@@ -34,3 +34,21 @@ Phase 4 scaffold for a Gmail pixel-tracking system.
   - `GET /dashboard/api/open-events`
 - Dashboard API requires header `X-Tracker-Token` with secret from env var `DASHBOARD_TOKEN`.
 - Dashboard page asks for token with a prompt and sends it in API requests.
+
+## Public HTTPS setup (email-tracker.duckdns.org)
+
+Use this when testing from Gmail so the tracking pixel is loaded over HTTPS.
+
+1. Point `email-tracker.duckdns.org` to your server public IP in DuckDNS.
+2. Open firewall/NAT for TCP 80 and 443 to that server.
+3. Run the tracker API on localhost (for example on port 8090) with `DASHBOARD_TOKEN` set.
+4. Put a reverse proxy (Caddy or Nginx) in front of the node server:
+  - terminate TLS for `email-tracker.duckdns.org`
+  - proxy requests to `http://127.0.0.1:8090`
+  - sample configs are included in `deploy/Caddyfile` and `deploy/nginx-email-tracker.conf`
+5. Verify externally:
+  - `https://email-tracker.duckdns.org/health`
+  - `https://email-tracker.duckdns.org/t/<token>.gif`
+6. In the extension popup, set **Tracker Base URL** to `https://email-tracker.duckdns.org`.
+7. Reload the unpacked extension and send a test email from Gmail.
+8. Open the email, then verify rows in SQLite (`tracked_emails`, `open_events`) and the dashboard.

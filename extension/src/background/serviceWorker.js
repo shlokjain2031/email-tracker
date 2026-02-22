@@ -4,7 +4,8 @@ const STORAGE_KEYS = {
   RECENT_EMAILS: "recent_tracked_emails"
 };
 
-const DEFAULT_TRACKER_BASE_URL = "http://localhost:8080";
+const DEFAULT_TRACKER_BASE_URL = "https://email-tracker.duckdns.org";
+const LEGACY_TRACKER_BASE_URLS = new Set(["http://localhost:8080", "http://localhost:8090"]);
 const RECENT_LIMIT = 100;
 
 chrome.runtime.onInstalled.addListener(async () => {
@@ -12,7 +13,7 @@ chrome.runtime.onInstalled.addListener(async () => {
     STORAGE_KEYS.TRACKER_BASE_URL
   );
 
-  if (!trackerBaseUrl) {
+  if (!trackerBaseUrl || LEGACY_TRACKER_BASE_URLS.has(String(trackerBaseUrl).trim())) {
     await chrome.storage.local.set({
       [STORAGE_KEYS.TRACKER_BASE_URL]: DEFAULT_TRACKER_BASE_URL
     });

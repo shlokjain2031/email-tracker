@@ -12,6 +12,6 @@ Load this folder as an unpacked extension in Chrome.
 
 ## Default tracker URL
 
-`http://localhost:8080`
+`https://email-tracker.duckdns.org`
 
-Update it from popup before sending if your tracker API runs elsewhere.
+The popup still allows overriding this value. Use an HTTPS URL so Gmail does not block the pixel request as mixed content.
