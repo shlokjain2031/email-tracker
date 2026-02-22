@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Email Tracker Dashboard</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        background: #f6f7f9;
+        color: #1f2937;
+      }
+
+      .container {
+        max-width: 960px;
+        margin: 24px auto;
+        padding: 0 16px;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 24px;
+      }
+
+      .tabs {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      .tab-btn {
+        border: 1px solid #d1d5db;
+        background: #fff;
+        border-radius: 8px;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+
+      .tab-btn.active {
+        background: #111827;
+        color: #fff;
+        border-color: #111827;
+      }
+
+      .panel {
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        padding: 12px;
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      .toolbar {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+
+      input,
+      button {
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        padding: 6px 8px;
+      }
+
+      button {
+        background: #111827;
+        color: #fff;
+        cursor: pointer;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid #eee;
+        text-align: left;
+        padding: 8px 6px;
+        vertical-align: top;
+      }
+
+      .muted {
+        color: #6b7280;
+      }
+
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        word-break: break-word;
+      }
+
+      .opens-badge {
+        border: 0;
+        background: #8b5cf6;
+        color: #fff;
+        border-radius: 999px;
+        padding: 4px 10px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .opens-badge:hover {
+        background: #7c3aed;
+      }
+
+      .filter-note {
+        font-size: 12px;
+      }
+
+      #status {
+        margin-bottom: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Email Tracker Dashboard</h1>
+      <div id="status" class="muted">Enter dashboard token to load data.</div>
+
+      <div class="tabs">
+        <button id="emailsTabBtn" class="tab-btn active">Emails</button>
+        <button id="opensTabBtn" class="tab-btn">Open Events</button>
+      </div>
+
+      <section id="emailsPanel" class="panel">
+        <table>
+          <thead>
+            <tr>
+              <th>Email ID</th>
+              <th>Recipient</th>
+              <th>Sent At</th>
+              <th>Opens</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="emailsBody"></tbody>
+        </table>
+      </section>
+
+      <section id="opensPanel" class="panel hidden">
+        <div class="toolbar">
+          <label for="emailFilter">Email ID filter</label>
+          <input id="emailFilter" type="text" placeholder="Optional email_id" />
+          <button id="applyFilterBtn">Apply</button>
+          <button id="clearFilterBtn" type="button">Clear</button>
+          <span id="filterNote" class="filter-note muted"></span>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Email ID</th>
+              <th>Opened At</th>
+              <th>IP</th>
+              <th>UA</th>
+              <th>Geo</th>
+              <th>Duplicate</th>
+            </tr>
+          </thead>
+          <tbody id="opensBody"></tbody>
+        </table>
+      </section>
+    </div>
+
+    <script>
+      const state = {
+        token: "",
+        activeTab: "emails"
+      };
+
+      const statusNode = document.getElementById("status");
+      const emailsBody = document.getElementById("emailsBody");
+      const opensBody = document.getElementById("opensBody");
+
+      const emailsTabBtn = document.getElementById("emailsTabBtn");
+      const opensTabBtn = document.getElementById("opensTabBtn");
+      const emailsPanel = document.getElementById("emailsPanel");
+      const opensPanel = document.getElementById("opensPanel");
+      const applyFilterBtn = document.getElementById("applyFilterBtn");
+      const clearFilterBtn = document.getElementById("clearFilterBtn");
+      const emailFilterInput = document.getElementById("emailFilter");
+      const filterNote = document.getElementById("filterNote");
+
+      init();
+
+      async function init() {
+        const token = window.prompt("Enter dashboard token");
+        if (!token) {
+          setStatus("No token entered. Refresh to try again.", true);
+          return;
+        }
+
+        state.token = token;
+        await loadEmails();
+        await loadOpenEvents("");
+        setFilterNote("");
+      }
+
+      emailsTabBtn.addEventListener("click", () => setActiveTab("emails"));
+      opensTabBtn.addEventListener("click", () => setActiveTab("opens"));
+      applyFilterBtn.addEventListener("click", async () => {
+        const emailId = emailFilterInput.value.trim();
+        await loadOpenEvents(emailId);
+        setFilterNote(emailId);
+      });
+
+      clearFilterBtn.addEventListener("click", async () => {
+        emailFilterInput.value = "";
+        await loadOpenEvents("");
+        setFilterNote("");
+      });
+
+      function setActiveTab(tab) {
+        state.activeTab = tab;
+        const isEmails = tab === "emails";
+
+        emailsTabBtn.classList.toggle("active", isEmails);
+        opensTabBtn.classList.toggle("active", !isEmails);
+        emailsPanel.classList.toggle("hidden", !isEmails);
+        opensPanel.classList.toggle("hidden", isEmails);
+      }
+
+      async function loadEmails() {
+        const response = await fetch("/dashboard/api/emails", {
+          headers: { "X-Tracker-Token": state.token }
+        });
+
+        if (!response.ok) {
+          setStatus("Failed to load emails. Verify token.", true);
+          return;
+        }
+
+        const data = await response.json();
+        const items = data.items || [];
+
+        emailsBody.innerHTML = "";
+        if (!items.length) {
+          emailsBody.innerHTML = '<tr><td colspan="5" class="muted">No tracked emails yet.</td></tr>';
+          setStatus("No email rows yet.");
+          return;
+        }
+
+        for (const item of items) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td class="mono">${escapeHtml(item.email_id)}</td>
+            <td>${escapeHtml(item.recipient)}</td>
+            <td>${escapeHtml(item.sent_at)}</td>
+            <td>
+              <button class="opens-badge" data-email-id="${escapeHtml(item.email_id)}" type="button">
+                Opens: ${item.open_count}
+              </button>
+            </td>
+            <td>${item.opened ? "opened" : "unopened"}</td>
+          `;
+          emailsBody.appendChild(tr);
+        }
+
+        bindOpenBadgeHandlers();
+
+        setStatus(`Loaded ${items.length} email rows.`);
+      }
+
+      function bindOpenBadgeHandlers() {
+        const badges = emailsBody.querySelectorAll(".opens-badge");
+
+        badges.forEach((badge) => {
+          badge.addEventListener("click", async () => {
+            const emailId = badge.getAttribute("data-email-id") || "";
+            emailFilterInput.value = emailId;
+            setActiveTab("opens");
+            await loadOpenEvents(emailId);
+            setFilterNote(emailId);
+          });
+        });
+      }
+
+      async function loadOpenEvents(emailId) {
+        const query = emailId ? `?email_id=${encodeURIComponent(emailId)}` : "";
+        const response = await fetch(`/dashboard/api/open-events${query}`, {
+          headers: { "X-Tracker-Token": state.token }
+        });
+
+        if (!response.ok) {
+          setStatus("Failed to load open events. Verify token.", true);
+          return;
+        }
+
+        const data = await response.json();
+        const items = data.items || [];
+
+        opensBody.innerHTML = "";
+        if (!items.length) {
+          opensBody.innerHTML = '<tr><td colspan="7" class="muted">No open events found.</td></tr>';
+          setStatus("No open-event rows for current filter.");
+          return;
+        }
+
+        for (const item of items) {
+          const geo = [item.geo_city, item.geo_region, item.geo_country].filter(Boolean).join(", ");
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${item.id}</td>
+            <td class="mono">${escapeHtml(item.email_id)}</td>
+            <td>${escapeHtml(item.opened_at)}</td>
+            <td>${escapeHtml(item.ip_address || "")}</td>
+            <td class="mono">${escapeHtml(item.user_agent || "")}</td>
+            <td>${escapeHtml(geo)}</td>
+            <td>${item.is_duplicate ? "yes" : "no"}</td>
+          `;
+          opensBody.appendChild(tr);
+        }
+
+        setStatus(`Loaded ${items.length} open events.`);
+      }
+
+      function setFilterNote(emailId) {
+        if (!emailId) {
+          filterNote.textContent = "Showing all events";
+          return;
+        }
+
+        filterNote.textContent = `Showing events for ${emailId}`;
+      }
+
+      function setStatus(text, isError) {
+        statusNode.textContent = text;
+        statusNode.style.color = isError ? "#b91c1c" : "#6b7280";
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/\"/g, "&quot;")
+          .replace(/'/g, "&#039;");
+      }
+    </script>
+  </body>
+</html>

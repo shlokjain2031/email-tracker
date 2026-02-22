@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Gmail Email Tracker",
+  "version": "0.1.0",
+  "description": "Tracks Gmail email opens via pixel tracking.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://mail.google.com/*", "http://*/*", "https://*/*"],
+  "background": {
+    "service_worker": "src/background/serviceWorker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://mail.google.com/*"],
+      "js": ["src/content/gmailCompose.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Gmail Email Tracker",
+    "default_popup": "src/popup/popup.html"
+  }
+}

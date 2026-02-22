@@ -1,0 +1,25 @@
+{
+  "name": "email-tracker-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "node --watch --loader ts-node/esm src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@email-tracker/shared": "0.1.0",
+    "better-sqlite3": "^11.7.0",
+    "express": "^4.21.2",
+    "geoip-lite": "^1.1.7"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/express": "^5.0.0",
+    "@types/geoip-lite": "^1.4.4",
+    "@types/node": "^22.13.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.3"
+  }
+}

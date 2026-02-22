@@ -1,0 +1,95 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Email Tracker</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 12px;
+        width: 360px;
+        color: #202124;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 16px;
+      }
+
+      .section {
+        margin-bottom: 14px;
+      }
+
+      .label {
+        font-size: 12px;
+        color: #5f6368;
+      }
+
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        word-break: break-word;
+      }
+
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 8px;
+        border: 1px solid #dadce0;
+        border-radius: 6px;
+      }
+
+      button {
+        margin-top: 8px;
+        border: 0;
+        border-radius: 6px;
+        background: #1a73e8;
+        color: #fff;
+        padding: 8px 10px;
+        cursor: pointer;
+      }
+
+      .item {
+        border: 1px solid #ececec;
+        border-radius: 8px;
+        padding: 8px;
+        margin-bottom: 8px;
+      }
+
+      .empty {
+        color: #5f6368;
+        font-size: 12px;
+      }
+
+      #status {
+        font-size: 12px;
+        margin-top: 4px;
+        color: #188038;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Tracking Monitor</h1>
+
+    <div class="section">
+      <div class="label">User UUID</div>
+      <div id="userId" class="mono">Loading...</div>
+    </div>
+
+    <div class="section">
+      <div class="label">Tracker Base URL</div>
+      <input id="trackerUrl" type="text" placeholder="http://localhost:8080" />
+      <button id="saveUrl">Save URL</button>
+      <div id="status"></div>
+    </div>
+
+    <div class="section">
+      <div class="label">Recently Tracked Emails</div>
+      <div id="recentList"></div>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
