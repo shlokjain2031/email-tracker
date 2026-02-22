@@ -3,7 +3,7 @@ import type { TrackingPayload } from "@email-tracker/shared";
 import { getDb, initDb } from "../db/sqlite.js";
 import { resolveGeoFromIp } from "./geoip.js";
 
-const DEDUP_WINDOW_MS = 60_000;
+const DEDUP_WINDOW_MS = 10_000;
 
 export interface RecordOpenInput {
   payload: TrackingPayload;

@@ -25,7 +25,7 @@ Phase 4 scaffold for a Gmail pixel-tracking system.
   - `Pragma: no-cache`
   - `Expires: 0`
 - On each open, server stores IP + User-Agent + immediate GeoIP enrichment.
-- Deduplication is active for 60 seconds on (`email_id`, `ip_address`, `user_agent`):
+- Deduplication is active for 10 seconds on (`email_id`, `ip_address`, `user_agent`):
   - duplicate events are stored with `is_duplicate = 1`
   - only non-duplicates increment `tracked_emails.open_count`
 - Dashboard UI is served by the same Express server at `/dashboard`.

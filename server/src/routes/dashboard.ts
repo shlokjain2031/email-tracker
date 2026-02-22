@@ -12,7 +12,9 @@ interface TrackedEmailRow {
   user_id: string;
   recipient: string;
   sent_at: string;
-  open_count: number;
+  unique_open_count: number;
+  total_open_events: number;
+  last_opened_at: string | null;
   created_at: string;
 }
 
@@ -37,14 +39,24 @@ const db = getDb();
 
 const listEmailsStmt = db.prepare(`
   SELECT
-    email_id,
-    user_id,
-    recipient,
-    sent_at,
-    open_count,
-    created_at
-  FROM tracked_emails
-  ORDER BY datetime(created_at) DESC
+    te.email_id,
+    te.user_id,
+    te.recipient,
+    te.sent_at,
+    te.open_count AS unique_open_count,
+    COALESCE(oe.total_open_events, 0) AS total_open_events,
+    oe.last_opened_at,
+    te.created_at
+  FROM tracked_emails te
+  LEFT JOIN (
+    SELECT
+      email_id,
+      COUNT(*) AS total_open_events,
+      MAX(opened_at) AS last_opened_at
+    FROM open_events
+    GROUP BY email_id
+  ) oe ON oe.email_id = te.email_id
+  ORDER BY datetime(te.created_at) DESC
 `);
 
 const listOpenEventsBaseSql = `
@@ -85,8 +97,10 @@ dashboardRouter.get("/dashboard/api/emails", (req, res) => {
     user_id: row.user_id,
     recipient: row.recipient,
     sent_at: row.sent_at,
-    open_count: row.open_count,
-    opened: row.open_count > 0,
+    unique_open_count: row.unique_open_count,
+    total_open_events: row.total_open_events,
+    last_opened_at: row.last_opened_at,
+    opened: row.unique_open_count > 0,
     created_at: row.created_at
   }));
 

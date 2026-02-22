@@ -1,5 +1,6 @@
 const userIdNode = document.getElementById("userId");
 const trackerUrlInput = document.getElementById("trackerUrl");
+const dashboardTokenInput = document.getElementById("dashboardToken");
 const saveUrlBtn = document.getElementById("saveUrl");
 const statusNode = document.getElementById("status");
 const recentListNode = document.getElementById("recentList");
@@ -9,18 +10,29 @@ loadPopupData();
 saveUrlBtn.addEventListener("click", async () => {
   setStatus("");
 
-  const response = await chrome.runtime.sendMessage({
+  const urlResponse = await chrome.runtime.sendMessage({
     type: "tracker:updateTrackerBaseUrl",
     baseUrl: trackerUrlInput.value
   });
 
-  if (!response?.ok) {
-    setStatus(response?.error || "Could not save URL", true);
+  if (!urlResponse?.ok) {
+    setStatus(urlResponse?.error || "Could not save URL", true);
     return;
   }
 
-  trackerUrlInput.value = response.trackerBaseUrl;
-  setStatus("Tracker URL saved");
+  const tokenResponse = await chrome.runtime.sendMessage({
+    type: "tracker:updateDashboardToken",
+    dashboardToken: dashboardTokenInput.value
+  });
+
+  if (!tokenResponse?.ok) {
+    setStatus(tokenResponse?.error || "Could not save token", true);
+    return;
+  }
+
+  trackerUrlInput.value = urlResponse.trackerBaseUrl;
+  dashboardTokenInput.value = tokenResponse.dashboardToken;
+  setStatus("Tracker URL and token saved");
 });
 
 async function loadPopupData() {
@@ -33,6 +45,7 @@ async function loadPopupData() {
 
   userIdNode.textContent = response.userId;
   trackerUrlInput.value = response.trackerBaseUrl;
+  dashboardTokenInput.value = response.dashboardToken || "";
   renderRecent(response.recentEmails || []);
 }
 

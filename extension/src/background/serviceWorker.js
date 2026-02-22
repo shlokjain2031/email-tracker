@@ -1,7 +1,8 @@
 const STORAGE_KEYS = {
   USER_ID: "tracker_user_id",
   TRACKER_BASE_URL: "tracker_base_url",
-  RECENT_EMAILS: "recent_tracked_emails"
+  RECENT_EMAILS: "recent_tracked_emails",
+  DASHBOARD_TOKEN: "dashboard_token"
 };
 
 const DEFAULT_TRACKER_BASE_URL = "https://email-tracker.duckdns.org";
@@ -47,14 +48,35 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return;
     }
 
+    if (message?.type === "tracker:getInboxBadgeData") {
+      const {
+        [STORAGE_KEYS.RECENT_EMAILS]: recentEmails = [],
+        [STORAGE_KEYS.TRACKER_BASE_URL]: trackerBaseUrl = DEFAULT_TRACKER_BASE_URL,
+        [STORAGE_KEYS.DASHBOARD_TOKEN]: dashboardToken = ""
+      } = await chrome.storage.local.get([
+        STORAGE_KEYS.RECENT_EMAILS,
+        STORAGE_KEYS.TRACKER_BASE_URL,
+        STORAGE_KEYS.DASHBOARD_TOKEN
+      ]);
+
+      const enriched = await enrichRecentEmails(recentEmails, trackerBaseUrl, dashboardToken);
+      sendResponse({ ok: true, trackerBaseUrl, items: enriched });
+      return;
+    }
+
     if (message?.type === "tracker:getPopupData") {
       const userId = await ensureUserId();
       const {
         [STORAGE_KEYS.RECENT_EMAILS]: recentEmails = [],
-        [STORAGE_KEYS.TRACKER_BASE_URL]: trackerBaseUrl = DEFAULT_TRACKER_BASE_URL
-      } = await chrome.storage.local.get([STORAGE_KEYS.RECENT_EMAILS, STORAGE_KEYS.TRACKER_BASE_URL]);
+        [STORAGE_KEYS.TRACKER_BASE_URL]: trackerBaseUrl = DEFAULT_TRACKER_BASE_URL,
+        [STORAGE_KEYS.DASHBOARD_TOKEN]: dashboardToken = ""
+      } = await chrome.storage.local.get([
+        STORAGE_KEYS.RECENT_EMAILS,
+        STORAGE_KEYS.TRACKER_BASE_URL,
+        STORAGE_KEYS.DASHBOARD_TOKEN
+      ]);
 
-      sendResponse({ ok: true, userId, trackerBaseUrl, recentEmails });
+      sendResponse({ ok: true, userId, trackerBaseUrl, dashboardToken, recentEmails });
       return;
     }
 
@@ -62,6 +84,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const baseUrl = normalizeBaseUrl(message.baseUrl || "");
       await chrome.storage.local.set({ [STORAGE_KEYS.TRACKER_BASE_URL]: baseUrl });
       sendResponse({ ok: true, trackerBaseUrl: baseUrl });
+      return;
+    }
+
+    if (message?.type === "tracker:updateDashboardToken") {
+      const dashboardToken = String(message.dashboardToken || "").trim();
+      await chrome.storage.local.set({ [STORAGE_KEYS.DASHBOARD_TOKEN]: dashboardToken });
+      sendResponse({ ok: true, dashboardToken });
       return;
     }
 
@@ -95,6 +124,7 @@ async function appendRecentTrackedEmail(payload) {
     {
       emailId: payload.emailId,
       recipient: payload.recipient || "unknown",
+      subject: payload.subject || "",
       sentAt: payload.sentAt,
       pixelUrl: payload.pixelUrl
     },
@@ -115,6 +145,57 @@ function normalizeBaseUrl(url) {
   }
 
   return normalized.replace(/\/+$/, "");
+}
+
+async function enrichRecentEmails(recentEmails, trackerBaseUrl, dashboardToken) {
+  const normalizedBaseUrl = normalizeBaseUrl(trackerBaseUrl || DEFAULT_TRACKER_BASE_URL);
+
+  if (!dashboardToken) {
+    return recentEmails.map((item) => ({
+      ...item,
+      totalOpenEvents: 0,
+      uniqueOpenCount: 0,
+      lastOpenedAt: null
+    }));
+  }
+
+  try {
+    const response = await fetch(`${normalizedBaseUrl}/dashboard/api/emails`, {
+      headers: {
+        "X-Tracker-Token": dashboardToken
+      }
+    });
+
+    if (!response.ok) {
+      return recentEmails.map((item) => ({
+        ...item,
+        totalOpenEvents: 0,
+        uniqueOpenCount: 0,
+        lastOpenedAt: null
+      }));
+    }
+
+    const payload = await response.json();
+    const serverItems = Array.isArray(payload?.items) ? payload.items : [];
+    const byEmailId = new Map(serverItems.map((item) => [item.email_id, item]));
+
+    return recentEmails.map((item) => {
+      const matched = byEmailId.get(item.emailId);
+      return {
+        ...item,
+        totalOpenEvents: matched?.total_open_events ?? 0,
+        uniqueOpenCount: matched?.unique_open_count ?? 0,
+        lastOpenedAt: matched?.last_opened_at ?? null
+      };
+    });
+  } catch {
+    return recentEmails.map((item) => ({
+      ...item,
+      totalOpenEvents: 0,
+      uniqueOpenCount: 0,
+      lastOpenedAt: null
+    }));
+  }
 }
 
 function encodeTrackingToken(payload) {

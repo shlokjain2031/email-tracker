@@ -1,21 +1,60 @@
 const TRACKER_PIXEL_MARKER = "data-email-tracker-pixel";
+const ROW_BADGE_MARKER = "data-email-tracker-badge-bound";
+const BADGE_REFRESH_MS = 15_000;
+
+let inboxBadgeItems = [];
+let lastInboxRefreshAt = 0;
 
 init();
 
 function init() {
-  attachComposeObserver();
+  injectBadgeStyles();
+  attachPageObserver();
   scanForComposeDialogs();
+  refreshInboxBadgeData();
+  setInterval(refreshInboxBadgeData, BADGE_REFRESH_MS);
 }
 
-function attachComposeObserver() {
+function attachPageObserver() {
   const observer = new MutationObserver(() => {
     scanForComposeDialogs();
+    renderInboxBadges();
   });
 
   observer.observe(document.documentElement, {
     childList: true,
     subtree: true
   });
+}
+
+function injectBadgeStyles() {
+  if (document.getElementById("email-tracker-badge-style")) {
+    return;
+  }
+
+  const style = document.createElement("style");
+  style.id = "email-tracker-badge-style";
+  style.textContent = `
+    .et-opens-badge {
+      display: inline-block;
+      border: 0;
+      border-radius: 7px;
+      padding: 2px 8px;
+      margin: 2px 0;
+      background: #8b5cf6;
+      color: #fff;
+      font-size: 14px;
+      line-height: 18px;
+      cursor: pointer;
+    }
+
+    .et-opens-badge.et-muted {
+      background: #ede9fe;
+      color: #7c3aed;
+    }
+  `;
+
+  document.head.appendChild(style);
 }
 
 function scanForComposeDialogs() {
@@ -74,6 +113,7 @@ async function injectTrackingPixelIfNeeded(dialog) {
   }
 
   const recipient = getPrimaryRecipient(dialog);
+  const subject = getSubject(dialog);
 
   const response = await chrome.runtime.sendMessage({
     type: "tracker:getComposeTrackingData",
@@ -99,10 +139,13 @@ async function injectTrackingPixelIfNeeded(dialog) {
     payload: {
       emailId: response.emailId,
       recipient: response.recipient,
+      subject,
       sentAt: response.sentAt,
       pixelUrl: response.pixelUrl
     }
   });
+
+  refreshInboxBadgeData();
 }
 
 function findComposeBody(dialog) {
@@ -110,6 +153,15 @@ function findComposeBody(dialog) {
     dialog.querySelector('div[aria-label="Message Body"]') ||
     dialog.querySelector('div[role="textbox"][contenteditable="true"]')
   );
+}
+
+function getSubject(dialog) {
+  const subjectInput = dialog.querySelector('input[name="subjectbox"], input[aria-label*="Subject"]');
+  if (subjectInput instanceof HTMLInputElement) {
+    return subjectInput.value.trim();
+  }
+
+  return "";
 }
 
 function getPrimaryRecipient(dialog) {
@@ -126,4 +178,117 @@ function getPrimaryRecipient(dialog) {
   }
 
   return "unknown";
+}
+
+async function refreshInboxBadgeData() {
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "tracker:getInboxBadgeData"
+    });
+
+    if (!response?.ok || !Array.isArray(response.items)) {
+      return;
+    }
+
+    inboxBadgeItems = response.items;
+    lastInboxRefreshAt = Date.now();
+    renderInboxBadges();
+  } catch {
+    // no-op
+  }
+}
+
+function renderInboxBadges() {
+  if (Date.now() - lastInboxRefreshAt > BADGE_REFRESH_MS * 2) {
+    return;
+  }
+
+  const rows = document.querySelectorAll("tr.zA");
+
+  rows.forEach((row) => {
+    if (!(row instanceof HTMLElement)) {
+      return;
+    }
+
+    const rowText = row.textContent?.toLowerCase() || "";
+    const matched = findTrackedItemForRow(rowText);
+    const slot = findBadgeSlot(row);
+    if (!slot) {
+      return;
+    }
+
+    let badge = slot.querySelector(".et-opens-badge");
+    if (!badge) {
+      badge = document.createElement("button");
+      badge.type = "button";
+      badge.className = "et-opens-badge";
+      slot.prepend(badge);
+    }
+
+    if (!matched) {
+      badge.textContent = "Not tracked";
+      badge.classList.add("et-muted");
+      badge.onclick = null;
+      row.setAttribute(ROW_BADGE_MARKER, "0");
+      return;
+    }
+
+    const opens = Number(matched.totalOpenEvents || 0);
+    badge.textContent = opens > 0 ? `Opens:${opens}` : "Unopened";
+    badge.classList.remove("et-muted");
+    if (opens === 0) {
+      badge.classList.add("et-muted");
+    }
+    badge.onclick = () => {
+      const dashboardUrl = `${matched.baseUrl || "https://email-tracker.duckdns.org"}/dashboard?email_id=${encodeURIComponent(
+        matched.emailId
+      )}`;
+      window.open(dashboardUrl, "_blank", "noopener,noreferrer");
+    };
+    row.setAttribute(ROW_BADGE_MARKER, "1");
+  });
+}
+
+function findBadgeSlot(row) {
+  return row.querySelector("td.xY") || row.querySelector("td.yX") || row.querySelector("td");
+}
+
+function findTrackedItemForRow(rowText) {
+  if (!rowText || !inboxBadgeItems.length) {
+    return null;
+  }
+
+  for (const item of inboxBadgeItems) {
+    const recipient = String(item.recipient || "").toLowerCase();
+    const subject = String(item.subject || "").toLowerCase();
+    const recipientParts = recipient
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+    const recipientHit = recipientParts.some((part) => {
+      const local = part.split("@")[0];
+      return rowText.includes(part) || (local && rowText.includes(local));
+    });
+
+    const subjectHit = subject ? rowText.includes(subject) : false;
+
+    if (recipientHit || subjectHit) {
+      return {
+        ...item,
+        baseUrl: item.pixelUrl ? extractBaseUrl(item.pixelUrl) : "https://email-tracker.duckdns.org"
+      };
+    }
+  }
+
+  return null;
+}
+
+function extractBaseUrl(pixelUrl) {
+  try {
+    const url = new URL(pixelUrl);
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return "https://email-tracker.duckdns.org";
+  }
 }
