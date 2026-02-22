@@ -76,7 +76,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         STORAGE_KEYS.DASHBOARD_TOKEN
       ]);
 
-      sendResponse({ ok: true, userId, trackerBaseUrl, dashboardToken, recentEmails });
+      const enrichedRecentEmails = await enrichRecentEmails(recentEmails, trackerBaseUrl, dashboardToken);
+      const debugItems = await getPopupDebugItems(enrichedRecentEmails, trackerBaseUrl, dashboardToken);
+
+      sendResponse({
+        ok: true,
+        userId,
+        trackerBaseUrl,
+        dashboardToken,
+        recentEmails,
+        enrichedRecentEmails,
+        debugItems,
+        debugGeneratedAt: new Date().toISOString()
+      });
       return;
     }
 
@@ -195,6 +207,103 @@ async function enrichRecentEmails(recentEmails, trackerBaseUrl, dashboardToken) 
       uniqueOpenCount: 0,
       lastOpenedAt: null
     }));
+  }
+}
+
+async function getPopupDebugItems(items, trackerBaseUrl, dashboardToken) {
+  const normalizedBaseUrl = normalizeBaseUrl(trackerBaseUrl || DEFAULT_TRACKER_BASE_URL);
+  const trackerHost = safeHostFromUrl(normalizedBaseUrl);
+
+  if (!dashboardToken) {
+    return items.map((item) => ({
+      emailId: item.emailId,
+      recipient: item.recipient || "unknown",
+      subject: item.subject || "",
+      pixelUrl: item.pixelUrl || "",
+      pixelHost: safeHostFromUrl(item.pixelUrl),
+      trackerHost,
+      hostMatchesTracker: safeHostFromUrl(item.pixelUrl) === trackerHost,
+      totalOpenEvents: Number(item.totalOpenEvents || 0),
+      uniqueOpenCount: Number(item.uniqueOpenCount || 0),
+      lastOpenedAt: item.lastOpenedAt || null,
+      backendReachable: null,
+      backendStatus: "token missing"
+    }));
+  }
+
+  const debugItems = [];
+
+  for (const item of items) {
+    const pixelHost = safeHostFromUrl(item.pixelUrl);
+    const hostMatchesTracker = pixelHost === trackerHost;
+    const eventProbe = await getLatestEventForEmail(item.emailId, normalizedBaseUrl, dashboardToken);
+
+    debugItems.push({
+      emailId: item.emailId,
+      recipient: item.recipient || "unknown",
+      subject: item.subject || "",
+      pixelUrl: item.pixelUrl || "",
+      pixelHost,
+      trackerHost,
+      hostMatchesTracker,
+      totalOpenEvents: Number(item.totalOpenEvents || 0),
+      uniqueOpenCount: Number(item.uniqueOpenCount || 0),
+      lastOpenedAt: item.lastOpenedAt || null,
+      backendReachable: eventProbe.ok,
+      backendStatus: eventProbe.error || "ok",
+      latestEventAt: eventProbe.latestEventAt,
+      latestEventDuplicate: eventProbe.latestEventDuplicate
+    });
+  }
+
+  return debugItems;
+}
+
+async function getLatestEventForEmail(emailId, baseUrl, dashboardToken) {
+  if (!emailId) {
+    return { ok: false, error: "missing email id", latestEventAt: null, latestEventDuplicate: null };
+  }
+
+  try {
+    const response = await fetch(`${baseUrl}/dashboard/api/open-events?email_id=${encodeURIComponent(emailId)}`, {
+      headers: {
+        "X-Tracker-Token": dashboardToken
+      }
+    });
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: `open-events http ${response.status}`,
+        latestEventAt: null,
+        latestEventDuplicate: null
+      };
+    }
+
+    const payload = await response.json();
+    const first = Array.isArray(payload?.items) && payload.items.length > 0 ? payload.items[0] : null;
+
+    return {
+      ok: true,
+      error: null,
+      latestEventAt: first?.opened_at ?? null,
+      latestEventDuplicate: typeof first?.is_duplicate === "number" ? first.is_duplicate === 1 : null
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: String(error?.message || error),
+      latestEventAt: null,
+      latestEventDuplicate: null
+    };
+  }
+}
+
+function safeHostFromUrl(url) {
+  try {
+    return new URL(String(url || "")).host;
+  } catch {
+    return "";
   }
 }
 

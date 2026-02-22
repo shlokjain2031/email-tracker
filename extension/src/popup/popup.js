@@ -4,6 +4,8 @@ const dashboardTokenInput = document.getElementById("dashboardToken");
 const saveUrlBtn = document.getElementById("saveUrl");
 const statusNode = document.getElementById("status");
 const recentListNode = document.getElementById("recentList");
+const debugMetaNode = document.getElementById("debugMeta");
+const debugListNode = document.getElementById("debugList");
 
 loadPopupData();
 
@@ -40,13 +42,15 @@ async function loadPopupData() {
   if (!response?.ok) {
     userIdNode.textContent = "Unavailable";
     renderRecent([]);
+    renderDebug([], null);
     return;
   }
 
   userIdNode.textContent = response.userId;
   trackerUrlInput.value = response.trackerBaseUrl;
   dashboardTokenInput.value = response.dashboardToken || "";
-  renderRecent(response.recentEmails || []);
+  renderRecent(response.enrichedRecentEmails || response.recentEmails || []);
+  renderDebug(response.debugItems || [], response.debugGeneratedAt || null);
 }
 
 function renderRecent(items) {
@@ -67,8 +71,42 @@ function renderRecent(items) {
       <div><strong>Recipient:</strong> ${escapeHtml(item.recipient || "unknown")}</div>
       <div><strong>Email ID:</strong> <span class="mono">${escapeHtml(item.emailId || "")}</span></div>
       <div><strong>Sent At:</strong> ${escapeHtml(item.sentAt || "")}</div>
+      <div><strong>Opens:</strong> ${Number(item.totalOpenEvents || 0)} total / ${Number(item.uniqueOpenCount || 0)} unique</div>
+      <div><strong>Last Opened:</strong> ${escapeHtml(item.lastOpenedAt || "-")}</div>
     `;
     recentListNode.appendChild(wrapper);
+  });
+}
+
+function renderDebug(items, generatedAt) {
+  debugListNode.innerHTML = "";
+  debugMetaNode.textContent = generatedAt ? `Snapshot: ${generatedAt}` : "Snapshot unavailable";
+
+  if (!items.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "No debug data yet.";
+    debugListNode.appendChild(empty);
+    return;
+  }
+
+  items.slice(0, 8).forEach((item) => {
+    const wrapper = document.createElement("div");
+    wrapper.className = "debug-item";
+    const hostClass = item.hostMatchesTracker ? "ok" : "warn";
+    const backendClass = item.backendReachable === false ? "warn" : "ok";
+
+    wrapper.innerHTML = `
+      <div><strong>Email ID:</strong> <span class="mono">${escapeHtml(item.emailId || "")}</span></div>
+      <div><strong>Recipient:</strong> ${escapeHtml(item.recipient || "unknown")}</div>
+      <div><strong>Pixel Host:</strong> <span class="${hostClass}">${escapeHtml(item.pixelHost || "-")}</span></div>
+      <div><strong>Tracker Host:</strong> ${escapeHtml(item.trackerHost || "-")}</div>
+      <div><strong>Host Match:</strong> <span class="${hostClass}">${item.hostMatchesTracker ? "yes" : "NO"}</span></div>
+      <div><strong>Backend Probe:</strong> <span class="${backendClass}">${escapeHtml(item.backendStatus || "-")}</span></div>
+      <div><strong>Latest Event:</strong> ${escapeHtml(item.latestEventAt || "-")}</div>
+      <div><strong>Opens:</strong> ${Number(item.totalOpenEvents || 0)} total / ${Number(item.uniqueOpenCount || 0)} unique</div>
+    `;
+    debugListNode.appendChild(wrapper);
   });
 }
 

@@ -63,6 +63,25 @@
         font-size: 12px;
       }
 
+      .debug-item {
+        border: 1px solid #ececec;
+        border-radius: 8px;
+        padding: 8px;
+        margin-bottom: 8px;
+        background: #fafafa;
+        font-size: 12px;
+      }
+
+      .ok {
+        color: #188038;
+        font-weight: 600;
+      }
+
+      .warn {
+        color: #d93025;
+        font-weight: 600;
+      }
+
       #status {
         font-size: 12px;
         margin-top: 4px;
@@ -90,6 +109,12 @@
     <div class="section">
       <div class="label">Recently Tracked Emails</div>
       <div id="recentList"></div>
+    </div>
+
+    <div class="section">
+      <div class="label">Pixel Debug</div>
+      <div id="debugMeta" class="empty"></div>
+      <div id="debugList"></div>
     </div>
 
     <script src="popup.js"></script>
