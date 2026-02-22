@@ -15,12 +15,17 @@ trackRouter.get("/t/:token.gif", (req, res) => {
     const ipAddress = getRequestIp(req);
     const userAgent = req.get("user-agent") || null;
 
-    recordOpenEvent({
+    const result = recordOpenEvent({
       payload,
       ipAddress,
       userAgent,
       openedAtIso
     });
+
+    // eslint-disable-next-line no-console
+    console.info(
+      `[pixel-hit] email_id=${payload.email_id} duplicate=${result.isDuplicate ? 1 : 0} unique_open_count=${result.openCount} ip=${ipAddress || "-"}`
+    );
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error("Tracking pixel processing failed:", error);

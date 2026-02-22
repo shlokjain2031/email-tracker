@@ -1,5 +1,5 @@
 const TRACKER_PIXEL_MARKER = "data-email-tracker-pixel";
-const BADGE_REFRESH_MS = 15_000;
+const BADGE_REFRESH_MS = 10_000;
 const MUTATION_DEBOUNCE_MS = 250;
 const MAX_ROWS_TO_RENDER = 120;
 
@@ -13,9 +13,18 @@ init();
 function init() {
   injectBadgeStyles();
   attachPageObserver();
+  attachVisibilityRefresh();
   scanForComposeDialogs();
   refreshInboxBadgeData();
   setInterval(refreshInboxBadgeData, BADGE_REFRESH_MS);
+}
+
+function attachVisibilityRefresh() {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      refreshInboxBadgeData();
+    }
+  });
 }
 
 function attachPageObserver() {
@@ -294,9 +303,13 @@ function findTrackedItemForRow(rowText) {
     return null;
   }
 
+  const normalizedRow = normalizeText(rowText);
+  let bestMatch = null;
+  let bestScore = 0;
+
   for (const item of inboxBadgeItems) {
-    const recipient = String(item.recipient || "").toLowerCase();
-    const subject = String(item.subject || "").toLowerCase();
+    const recipient = normalizeText(String(item.recipient || ""));
+    const subject = normalizeText(String(item.subject || ""));
     const recipientParts = recipient
       .split(",")
       .map((part) => part.trim())
@@ -304,20 +317,54 @@ function findTrackedItemForRow(rowText) {
 
     const recipientHit = recipientParts.some((part) => {
       const local = part.split("@")[0];
-      return rowText.includes(part) || (local && rowText.includes(local));
+      return normalizedRow.includes(part) || (local && normalizedRow.includes(local));
     });
 
-    const subjectHit = subject ? rowText.includes(subject) : false;
+    const subjectHit = subject ? normalizedRow.includes(subject) : false;
+    const subjectTokenHit = !subjectHit && subject ? hasStrongSubjectTokenOverlap(normalizedRow, subject) : false;
 
-    if (recipientHit || subjectHit) {
-      return {
+    let score = 0;
+    if (subjectHit) score += 5;
+    if (subjectTokenHit) score += 3;
+    if (recipientHit) score += 2;
+
+    if (score === 0) {
+      continue;
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestMatch = {
         ...item,
         baseUrl: item.pixelUrl ? extractBaseUrl(item.pixelUrl) : "https://email-tracker.duckdns.org"
       };
     }
   }
 
-  return null;
+  return bestMatch;
+}
+
+function normalizeText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function hasStrongSubjectTokenOverlap(rowText, subject) {
+  const subjectTokens = subject.split(/[^a-z0-9]+/i).filter((token) => token.length >= 4);
+  if (!subjectTokens.length) {
+    return false;
+  }
+
+  let hits = 0;
+  for (const token of subjectTokens) {
+    if (rowText.includes(token)) {
+      hits += 1;
+    }
+  }
+
+  return hits >= Math.min(2, subjectTokens.length);
 }
 
 function extractBaseUrl(pixelUrl) {
