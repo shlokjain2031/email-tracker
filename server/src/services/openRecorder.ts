@@ -4,6 +4,7 @@ import { getDb, initDb } from "../db/sqlite.js";
 import { resolveGeoFromIp } from "./geoip.js";
 
 const DEDUP_WINDOW_MS = 10_000;
+const SELF_OPEN_GUARD_MS = Number(process.env.SELF_OPEN_GUARD_MS || 7_000);
 
 export interface RecordOpenInput {
   payload: TrackingPayload;
@@ -14,6 +15,7 @@ export interface RecordOpenInput {
 
 export interface RecordOpenResult {
   isDuplicate: boolean;
+  isSuppressedLikelySender: boolean;
   openCount: number;
 }
 
@@ -91,6 +93,14 @@ const txn = db.transaction((input: RecordOpenInput): RecordOpenResult => {
   ) as { id: number } | undefined;
 
   const isDuplicate = Boolean(duplicateRow);
+  const sentAtMs = Date.parse(input.payload.sent_at);
+  const openedAtMs = Date.parse(input.openedAtIso);
+  const isSuppressedLikelySender =
+    Number.isFinite(sentAtMs) &&
+    Number.isFinite(openedAtMs) &&
+    openedAtMs >= sentAtMs &&
+    openedAtMs - sentAtMs <= SELF_OPEN_GUARD_MS;
+
   const geo = resolveGeoFromIp(input.ipAddress);
 
   insertOpenEventStmt.run(
@@ -105,10 +115,10 @@ const txn = db.transaction((input: RecordOpenInput): RecordOpenResult => {
     geo.geo_city,
     geo.latitude,
     geo.longitude,
-    isDuplicate ? 1 : 0
+    isDuplicate || isSuppressedLikelySender ? 1 : 0
   );
 
-  if (!isDuplicate) {
+  if (!isDuplicate && !isSuppressedLikelySender) {
     incrementOpenCountStmt.run(input.payload.email_id);
   }
 
@@ -116,6 +126,7 @@ const txn = db.transaction((input: RecordOpenInput): RecordOpenResult => {
 
   return {
     isDuplicate,
+    isSuppressedLikelySender,
     openCount: row?.open_count ?? 0
   };
 });
@@ -167,6 +178,13 @@ function runWithDatabase(input: RecordOpenInput, database: Database.Database): R
       | undefined;
 
     const isDuplicate = Boolean(duplicateRow);
+    const sentAtMs = Date.parse(txInput.payload.sent_at);
+    const openedAtMs = Date.parse(txInput.openedAtIso);
+    const isSuppressedLikelySender =
+      Number.isFinite(sentAtMs) &&
+      Number.isFinite(openedAtMs) &&
+      openedAtMs >= sentAtMs &&
+      openedAtMs - sentAtMs <= SELF_OPEN_GUARD_MS;
     const geo = resolveGeoFromIp(txInput.ipAddress);
 
     database
@@ -202,10 +220,10 @@ function runWithDatabase(input: RecordOpenInput, database: Database.Database): R
         geo.geo_city,
         geo.latitude,
         geo.longitude,
-        isDuplicate ? 1 : 0
+        isDuplicate || isSuppressedLikelySender ? 1 : 0
       );
 
-    if (!isDuplicate) {
+    if (!isDuplicate && !isSuppressedLikelySender) {
       database
         .prepare(
           `
@@ -229,6 +247,7 @@ function runWithDatabase(input: RecordOpenInput, database: Database.Database): R
 
     return {
       isDuplicate,
+      isSuppressedLikelySender,
       openCount: row?.open_count ?? 0
     };
   });

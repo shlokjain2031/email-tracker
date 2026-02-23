@@ -24,7 +24,7 @@ trackRouter.get("/t/:token.gif", (req, res) => {
 
     // eslint-disable-next-line no-console
     console.info(
-      `[pixel-hit] email_id=${payload.email_id} duplicate=${result.isDuplicate ? 1 : 0} unique_open_count=${result.openCount} ip=${ipAddress || "-"}`
+      `[pixel-hit] email_id=${payload.email_id} duplicate=${result.isDuplicate ? 1 : 0} suppressed_likely_sender=${result.isSuppressedLikelySender ? 1 : 0} counted=${!result.isDuplicate && !result.isSuppressedLikelySender ? 1 : 0} unique_open_count=${result.openCount} ip=${ipAddress || "-"}`
     );
   } catch (error) {
     // eslint-disable-next-line no-console
