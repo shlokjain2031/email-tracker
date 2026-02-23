@@ -81,6 +81,19 @@ const incrementOpenCountStmt = db.prepare(`
   WHERE email_id = ?
 `);
 
+const getSenderFingerprintStmt = db.prepare(`
+  SELECT sender_ip, sender_user_agent
+  FROM tracked_emails
+  WHERE email_id = ?
+`);
+
+const upsertSenderFingerprintStmt = db.prepare(`
+  UPDATE tracked_emails
+  SET sender_ip = COALESCE(sender_ip, ?),
+      sender_user_agent = COALESCE(sender_user_agent, ?)
+  WHERE email_id = ?
+`);
+
 const getOpenCountStmt = db.prepare(`
   SELECT open_count
   FROM tracked_emails
@@ -129,6 +142,17 @@ const txn = db.transaction((input: RecordOpenInput): RecordOpenResult => {
 
   const isSuppressedLikelySender = isWithinInitialSenderWindow || Boolean(priorLikelySenderFingerprint);
 
+  const storedFingerprint = getSenderFingerprintStmt.get(input.payload.email_id) as
+    | { sender_ip: string | null; sender_user_agent: string | null }
+    | undefined;
+
+  const matchesStoredSenderFingerprint = Boolean(
+    storedFingerprint?.sender_ip &&
+      storedFingerprint.sender_user_agent &&
+      input.ipAddress === storedFingerprint.sender_ip &&
+      input.userAgent === storedFingerprint.sender_user_agent
+  );
+
   const geo = resolveGeoFromIp(input.ipAddress);
 
   insertOpenEventStmt.run(
@@ -143,14 +167,24 @@ const txn = db.transaction((input: RecordOpenInput): RecordOpenResult => {
     geo.geo_city,
     geo.latitude,
     geo.longitude,
-    isDuplicate || isSuppressedLikelySender ? 1 : 0
+    isDuplicate || isSuppressedLikelySender || matchesStoredSenderFingerprint ? 1 : 0
   );
 
-  if (!isDuplicate && !isSuppressedLikelySender) {
+  if (!isDuplicate && !isSuppressedLikelySender && !matchesStoredSenderFingerprint) {
     incrementOpenCountStmt.run(input.payload.email_id);
   }
 
   const row = getOpenCountStmt.get(input.payload.email_id) as CountRow | undefined;
+
+  if (
+    !storedFingerprint?.sender_ip &&
+    !storedFingerprint?.sender_user_agent &&
+    input.ipAddress &&
+    input.userAgent &&
+    (isSuppressedLikelySender || openedAtMs - sentAtMs <= SELF_OPEN_GUARD_MS * 2)
+  ) {
+    upsertSenderFingerprintStmt.run(input.ipAddress, input.userAgent, input.payload.email_id);
+  }
 
   return {
     isDuplicate,
@@ -240,6 +274,21 @@ function runWithDatabase(input: RecordOpenInput, database: Database.Database): R
         : undefined;
 
     const isSuppressedLikelySender = isWithinInitialSenderWindow || Boolean(priorLikelySenderFingerprint);
+    const storedFingerprint = database
+      .prepare(
+        `
+      SELECT sender_ip, sender_user_agent
+      FROM tracked_emails
+      WHERE email_id = ?
+    `
+      )
+      .get(txInput.payload.email_id) as | { sender_ip: string | null; sender_user_agent: string | null } | undefined;
+    const matchesStoredSenderFingerprint = Boolean(
+      storedFingerprint?.sender_ip &&
+        storedFingerprint.sender_user_agent &&
+        txInput.ipAddress === storedFingerprint.sender_ip &&
+        txInput.userAgent === storedFingerprint.sender_user_agent
+    );
     const geo = resolveGeoFromIp(txInput.ipAddress);
 
     database
@@ -275,10 +324,10 @@ function runWithDatabase(input: RecordOpenInput, database: Database.Database): R
         geo.geo_city,
         geo.latitude,
         geo.longitude,
-        isDuplicate || isSuppressedLikelySender ? 1 : 0
+        isDuplicate || isSuppressedLikelySender || matchesStoredSenderFingerprint ? 1 : 0
       );
 
-    if (!isDuplicate && !isSuppressedLikelySender) {
+    if (!isDuplicate && !isSuppressedLikelySender && !matchesStoredSenderFingerprint) {
       database
         .prepare(
           `
@@ -299,6 +348,25 @@ function runWithDatabase(input: RecordOpenInput, database: Database.Database): R
     `
       )
       .get(txInput.payload.email_id) as CountRow | undefined;
+
+    if (
+      !storedFingerprint?.sender_ip &&
+      !storedFingerprint?.sender_user_agent &&
+      txInput.ipAddress &&
+      txInput.userAgent &&
+      (isSuppressedLikelySender || openedAtMs - sentAtMs <= SELF_OPEN_GUARD_MS * 2)
+    ) {
+      database
+        .prepare(
+          `
+        UPDATE tracked_emails
+        SET sender_ip = COALESCE(sender_ip, ?),
+            sender_user_agent = COALESCE(sender_user_agent, ?)
+        WHERE email_id = ?
+      `
+        )
+        .run(txInput.ipAddress, txInput.userAgent, txInput.payload.email_id);
+    }
 
     return {
       isDuplicate,

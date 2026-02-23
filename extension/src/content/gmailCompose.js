@@ -164,16 +164,34 @@ function getSubject(dialog) {
 }
 
 function getPrimaryRecipient(dialog) {
-  const recipientNode = dialog.querySelector('[name="to"] [email], [email][data-hovercard-id]');
-  const direct = recipientNode?.getAttribute("email");
+  const selectors = [
+    'input[name="to"]',
+    'textarea[name="to"]',
+    'div[aria-label="To"] input',
+    'div[aria-label="To"] textarea'
+  ];
 
-  if (direct) {
-    return direct;
+  for (const selector of selectors) {
+    const node = dialog.querySelector(selector);
+    if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement) {
+      const value = (node.value || node.textContent || "").trim();
+      if (value) {
+        return value;
+      }
+    }
   }
 
-  const chips = Array.from(dialog.querySelectorAll('[email]')).map((el) => el.getAttribute("email")).filter(Boolean);
-  if (chips.length > 0) {
-    return chips.join(",");
+  const chipSet = new Set();
+  const chipNodes = dialog.querySelectorAll('[email], [data-hovercard-id][email]');
+  chipNodes.forEach((chip) => {
+    const email = chip.getAttribute("email") || chip.getAttribute("data-hovercard-id");
+    if (email) {
+      chipSet.add(email.trim());
+    }
+  });
+
+  if (chipSet.size > 0) {
+    return Array.from(chipSet).join(",");
   }
 
   return "unknown";
