@@ -102,6 +102,10 @@ async function injectTrackingPixelIfNeeded(dialog) {
   }
 
   const recipient = getPrimaryRecipient(dialog);
+  if (!recipient || recipient === "unknown") {
+    return;
+  }
+
   const subject = getSubject(dialog);
 
   const response = await chrome.runtime.sendMessage({
@@ -164,34 +168,48 @@ function getSubject(dialog) {
 }
 
 function getPrimaryRecipient(dialog) {
-  const selectors = [
+  const directSelectors = [
+    '[name="to"] [email]',
+    '[email][data-hovercard-id]',
+    '[email]'
+  ];
+
+  const emails = new Set();
+
+  directSelectors.forEach((selector) => {
+    dialog.querySelectorAll(selector).forEach((node) => {
+      if (!(node instanceof Element)) {
+        return;
+      }
+
+      const emailAttr = node.getAttribute("email") || "";
+      const hovercardAttr = node.getAttribute("data-hovercard-id") || "";
+      const candidate = (emailAttr || hovercardAttr).trim();
+      if (isLikelyEmail(candidate)) {
+        emails.add(candidate.toLowerCase());
+      }
+    });
+  });
+
+  const inputSelectors = [
     'input[name="to"]',
     'textarea[name="to"]',
     'div[aria-label="To"] input',
     'div[aria-label="To"] textarea'
   ];
 
-  for (const selector of selectors) {
+  inputSelectors.forEach((selector) => {
     const node = dialog.querySelector(selector);
-    if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement) {
-      const value = (node.value || node.textContent || "").trim();
-      if (value) {
-        return value;
-      }
+    if (!(node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement)) {
+      return;
     }
-  }
 
-  const chipSet = new Set();
-  const chipNodes = dialog.querySelectorAll('[email], [data-hovercard-id][email]');
-  chipNodes.forEach((chip) => {
-    const email = chip.getAttribute("email") || chip.getAttribute("data-hovercard-id");
-    if (email) {
-      chipSet.add(email.trim());
-    }
+    const parsed = extractEmailsFromText(node.value || "");
+    parsed.forEach((email) => emails.add(email));
   });
 
-  if (chipSet.size > 0) {
-    return Array.from(chipSet).join(",");
+  if (emails.size > 0) {
+    return Array.from(emails).join(",");
   }
 
   return "unknown";
@@ -288,14 +306,14 @@ function findBadgeSlot(row) {
 }
 
 function findTrackedItemForRow(row) {
-  if (!row || !inboxBadgeItems.length) {
+  if (!(row instanceof HTMLElement) || !inboxBadgeItems.length) {
     return null;
   }
 
-  const marker = row.querySelector('[data-email-tracker-marker]');
-  const emailIdFromMarker = marker?.dataset?.snv;
-  if (emailIdFromMarker) {
-    const exact = inboxBadgeItems.find((item) => String(item.emailId || "").toLowerCase() === emailIdFromMarker.toLowerCase());
+  const markerEmailId = extractMarkerEmailIdFromRow(row);
+  if (markerEmailId) {
+    const exact = inboxBadgeItems.find((item) => String(item.emailId || "").toLowerCase() === markerEmailId);
+
     if (exact) {
       return {
         ...exact,
@@ -305,20 +323,6 @@ function findTrackedItemForRow(row) {
   }
 
   const rowText = row.textContent?.toLowerCase() || "";
-
-  const markerEmailId = extractMarkerEmailId(rowText);
-  if (markerEmailId) {
-    const exact = inboxBadgeItems.find(
-      (item) => String(item.emailId || "").toLowerCase() === markerEmailId
-    );
-
-    if (exact) {
-      return {
-        ...exact,
-        baseUrl: exact.pixelUrl ? extractBaseUrl(exact.pixelUrl) : "https://email-tracker.duckdns.org"
-      };
-    }
-  }
 
   const normalizedRow = normalizeText(rowText);
   let bestMatch = null;
@@ -361,9 +365,29 @@ function findTrackedItemForRow(row) {
   return bestMatch;
 }
 
-function extractMarkerEmailId(rowText) {
-  const match = String(rowText || "").match(/snv:([0-9a-f-]{36})/i);
-  return match?.[1]?.toLowerCase() || null;
+function extractMarkerEmailIdFromRow(row) {
+  const rowHtml = row.innerHTML || "";
+  const byDataAttr = rowHtml.match(/data-snv=["']([0-9a-f-]{36})["']/i);
+  if (byDataAttr?.[1]) {
+    return byDataAttr[1].toLowerCase();
+  }
+
+  const byId = rowHtml.match(/snvTrackDiv-([0-9a-f-]{36})/i);
+  if (byId?.[1]) {
+    return byId[1].toLowerCase();
+  }
+
+  const byText = row.textContent?.match(/snv:([0-9a-f-]{36})/i);
+  return byText?.[1]?.toLowerCase() || null;
+}
+
+function extractEmailsFromText(value) {
+  const matches = String(value || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [];
+  return matches.map((email) => email.toLowerCase());
+}
+
+function isLikelyEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/i.test(String(value || "").trim());
 }
 
 function normalizeText(value) {

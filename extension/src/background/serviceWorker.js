@@ -186,6 +186,7 @@ async function enrichRecentEmails(recentEmails, trackerBaseUrl, dashboardToken) 
       const matched = byEmailId.get(item.emailId);
       return {
         ...item,
+        recipient: matched?.recipient || item.recipient || "unknown",
         totalOpenEvents: matched?.total_open_events ?? 0,
         uniqueOpenCount: matched?.unique_open_count ?? 0,
         lastOpenedAt: matched?.last_opened_at ?? null

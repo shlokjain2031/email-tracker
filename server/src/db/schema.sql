@@ -5,8 +5,6 @@ CREATE TABLE IF NOT EXISTS tracked_emails (
   user_id TEXT NOT NULL,
   recipient TEXT NOT NULL,
   sent_at TEXT NOT NULL,
-  sender_ip TEXT,
-  sender_user_agent TEXT,
   open_count INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

@@ -24,17 +24,6 @@ export function initDb(db = getDb()): void {
   const schemaPath = resolveSchemaPath();
   const schemaSql = fs.readFileSync(schemaPath, "utf8");
   db.exec(schemaSql);
-
-  ensureColumnExists(db, "tracked_emails", "sender_ip", "TEXT");
-  ensureColumnExists(db, "tracked_emails", "sender_user_agent", "TEXT");
-}
-
-function ensureColumnExists(db: Database.Database, table: string, column: string, definition: string): void {
-  const info = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
-  const exists = info.some((row) => row.name === column);
-  if (!exists) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-  }
 }
 
 function resolveSchemaPath(): string {
