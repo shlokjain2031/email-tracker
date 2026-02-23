@@ -420,7 +420,7 @@ function renderInboxBadges() {
         const opens = Number(matched.totalOpenEvents || 0);
         title = `Opens: ${opens}`;
         clickHandler = () => {
-          const dashboardUrl = `${matched.baseUrl || "https://email-tracker.duckdns.org"}/dashboard?email_id=${encodeURIComponent(
+          const dashboardUrl = `${matched.baseUrl || "https://email-tracker.duckdns.org"}/dashboard?tab=opens&email_id=${encodeURIComponent(
             matched.emailId
           )}`;
           window.open(dashboardUrl, "_blank", "noopener,noreferrer");

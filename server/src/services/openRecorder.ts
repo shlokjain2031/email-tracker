@@ -56,6 +56,20 @@ const findRecentDuplicateByAgentStmt = db.prepare(`
   LIMIT 1
 `);
 
+const findRecentDuplicateProxyStmt = db.prepare(`
+  SELECT id
+  FROM open_events
+  WHERE email_id = ?
+    AND opened_at >= ?
+    AND (
+      LOWER(IFNULL(user_agent, '')) LIKE '%googleimageproxy%'
+      OR LOWER(IFNULL(user_agent, '')) LIKE '%google image proxy%'
+      OR LOWER(IFNULL(user_agent, '')) LIKE '%ggpht.com%'
+    )
+  ORDER BY opened_at DESC
+  LIMIT 1
+`);
+
 const findLikelySenderFingerprintStmt = db.prepare(`
   SELECT id
   FROM open_events
@@ -121,7 +135,11 @@ const txn = db.transaction((input: RecordOpenInput): RecordOpenResult => {
         | undefined)
     : undefined;
 
-  const isDuplicate = Boolean(duplicateRow || duplicateByAgentRow);
+  const duplicateByProxyWindowRow = isLikelyProxyAgent(input.userAgent)
+    ? (findRecentDuplicateProxyStmt.get(input.payload.email_id, dedupeThreshold) as { id: number } | undefined)
+    : undefined;
+
+  const isDuplicate = Boolean(duplicateRow || duplicateByAgentRow || duplicateByProxyWindowRow);
   const sentAtMs = Date.parse(input.payload.sent_at);
   const openedAtMs = Date.parse(input.openedAtIso);
   const isWithinInitialSenderWindow =
@@ -241,7 +259,27 @@ function runWithDatabase(input: RecordOpenInput, database: Database.Database): R
           .get(txInput.payload.email_id, txInput.userAgent, dedupeThreshold) as { id: number } | undefined)
       : undefined;
 
-    const isDuplicate = Boolean(duplicateRow || duplicateByAgentRow);
+    const duplicateByProxyWindowRow = isLikelyProxyAgent(txInput.userAgent)
+      ? (database
+          .prepare(
+            `
+      SELECT id
+      FROM open_events
+      WHERE email_id = ?
+        AND opened_at >= ?
+        AND (
+          LOWER(IFNULL(user_agent, '')) LIKE '%googleimageproxy%'
+          OR LOWER(IFNULL(user_agent, '')) LIKE '%google image proxy%'
+          OR LOWER(IFNULL(user_agent, '')) LIKE '%ggpht.com%'
+        )
+      ORDER BY opened_at DESC
+      LIMIT 1
+    `
+          )
+          .get(txInput.payload.email_id, dedupeThreshold) as { id: number } | undefined)
+      : undefined;
+
+    const isDuplicate = Boolean(duplicateRow || duplicateByAgentRow || duplicateByProxyWindowRow);
     const sentAtMs = Date.parse(txInput.payload.sent_at);
     const openedAtMs = Date.parse(txInput.openedAtIso);
     const isWithinInitialSenderWindow =
