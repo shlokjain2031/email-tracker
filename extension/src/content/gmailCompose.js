@@ -102,9 +102,6 @@ async function injectTrackingPixelIfNeeded(dialog) {
   }
 
   const recipient = getPrimaryRecipient(dialog);
-  if (!recipient || recipient === "unknown") {
-    return;
-  }
 
   const subject = getSubject(dialog);
 
@@ -129,8 +126,8 @@ async function injectTrackingPixelIfNeeded(dialog) {
   marker.id = `snvTrackDiv-${response.emailId}`;
   marker.setAttribute("data-email-tracker-marker", "1");
   marker.dataset.snv = response.emailId;
-  marker.style.cssText = "display:none!important;max-height:0;overflow:hidden;";
-  marker.textContent = "";
+  marker.style.cssText = "display:block;width:0;height:0;max-height:0;overflow:hidden;opacity:0;font-size:0;line-height:0;";
+  marker.textContent = "\u200C";
 
   body.appendChild(marker);
   body.appendChild(img);
