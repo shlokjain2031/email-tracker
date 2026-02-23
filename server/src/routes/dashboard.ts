@@ -82,6 +82,7 @@ const listOpenEventsBaseSql = `
     device_type,
     is_duplicate
   FROM open_events
+  WHERE is_duplicate = 0
 `;
 
 export const dashboardRouter = Router();
@@ -124,7 +125,7 @@ dashboardRouter.get("/dashboard/api/open-events", (req, res) => {
   const emailId = String(req.query.email_id || "").trim();
 
   const query = emailId
-    ? `${listOpenEventsBaseSql} WHERE email_id = ? ORDER BY datetime(opened_at) DESC`
+    ? `${listOpenEventsBaseSql} AND email_id = ? ORDER BY datetime(opened_at) DESC`
     : `${listOpenEventsBaseSql} ORDER BY datetime(opened_at) DESC`;
 
   const rows = emailId

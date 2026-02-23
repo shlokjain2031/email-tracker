@@ -178,7 +178,6 @@
               <th>IP</th>
               <th>UA</th>
               <th>Geo</th>
-              <th>Duplicate</th>
             </tr>
           </thead>
           <tbody id="opensBody"></tbody>
@@ -334,7 +333,7 @@
 
         opensBody.innerHTML = "";
         if (!items.length) {
-          opensBody.innerHTML = '<tr><td colspan="7" class="muted">No open events found.</td></tr>';
+          opensBody.innerHTML = '<tr><td colspan="6" class="muted">No open events found.</td></tr>';
           setStatus("No open-event rows for current filter.");
           return;
         }
@@ -350,7 +349,6 @@
             <td>${escapeHtml(item.ip_address || "")}</td>
             <td class="mono">${escapeHtml(item.user_agent || "")}</td>
             <td>${escapeHtml(geo)}</td>
-            <td>${item.is_duplicate ? "yes" : "no"}</td>
           `;
           opensBody.appendChild(tr);
         }

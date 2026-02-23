@@ -3,7 +3,7 @@ import type { TrackingPayload } from "@email-tracker/shared";
 import { getDb, initDb } from "../db/sqlite.js";
 import { resolveGeoFromIp } from "./geoip.js";
 
-const DEDUP_WINDOW_MS = 10_000;
+const DEDUP_WINDOW_MS = Number(process.env.DEDUP_WINDOW_MS || 30_000);
 const SELF_OPEN_GUARD_MS = Number(process.env.SELF_OPEN_GUARD_MS || 7_000);
 
 export interface RecordOpenInput {
@@ -40,6 +40,16 @@ const findRecentDuplicateStmt = db.prepare(`
   FROM open_events
   WHERE email_id = ?
     AND IFNULL(ip_address, '') = IFNULL(?, '')
+    AND IFNULL(user_agent, '') = IFNULL(?, '')
+    AND opened_at >= ?
+  ORDER BY opened_at DESC
+  LIMIT 1
+`);
+
+const findRecentDuplicateByAgentStmt = db.prepare(`
+  SELECT id
+  FROM open_events
+  WHERE email_id = ?
     AND IFNULL(user_agent, '') = IFNULL(?, '')
     AND opened_at >= ?
   ORDER BY opened_at DESC
@@ -105,7 +115,13 @@ const txn = db.transaction((input: RecordOpenInput): RecordOpenResult => {
     dedupeThreshold
   ) as { id: number } | undefined;
 
-  const isDuplicate = Boolean(duplicateRow);
+  const duplicateByAgentRow = isLikelyProxyAgent(input.userAgent)
+    ? (findRecentDuplicateByAgentStmt.get(input.payload.email_id, input.userAgent, dedupeThreshold) as
+        | { id: number }
+        | undefined)
+    : undefined;
+
+  const isDuplicate = Boolean(duplicateRow || duplicateByAgentRow);
   const sentAtMs = Date.parse(input.payload.sent_at);
   const openedAtMs = Date.parse(input.openedAtIso);
   const isWithinInitialSenderWindow =
@@ -209,7 +225,23 @@ function runWithDatabase(input: RecordOpenInput, database: Database.Database): R
       | { id: number }
       | undefined;
 
-    const isDuplicate = Boolean(duplicateRow);
+    const duplicateByAgentRow = isLikelyProxyAgent(txInput.userAgent)
+      ? (database
+          .prepare(
+            `
+      SELECT id
+      FROM open_events
+      WHERE email_id = ?
+        AND IFNULL(user_agent, '') = IFNULL(?, '')
+        AND opened_at >= ?
+      ORDER BY opened_at DESC
+      LIMIT 1
+    `
+          )
+          .get(txInput.payload.email_id, txInput.userAgent, dedupeThreshold) as { id: number } | undefined)
+      : undefined;
+
+    const isDuplicate = Boolean(duplicateRow || duplicateByAgentRow);
     const sentAtMs = Date.parse(txInput.payload.sent_at);
     const openedAtMs = Date.parse(txInput.openedAtIso);
     const isWithinInitialSenderWindow =
@@ -312,4 +344,9 @@ function runWithDatabase(input: RecordOpenInput, database: Database.Database): R
   });
 
   return localTxn(input);
+}
+
+function isLikelyProxyAgent(userAgent: string | null): boolean {
+  const ua = String(userAgent || "").toLowerCase();
+  return ua.includes("googleimageproxy") || ua.includes("google image proxy") || ua.includes("ggpht.com");
 }

@@ -76,6 +76,9 @@ function injectBadgeStyles() {
       white-space: nowrap;
       cursor: pointer;
       vertical-align: middle;
+      position: relative;
+      z-index: 5;
+      pointer-events: auto;
     }
 
     .et-opens-badge svg {
@@ -91,6 +94,8 @@ function injectBadgeStyles() {
     }
     .et-opens-slot {
       position: relative;
+      display: inline-flex;
+      align-items: center;
     }
   `;
 
@@ -405,13 +410,14 @@ function renderInboxBadges() {
         slot.appendChild(badge);
       }
 
-      let isDisabled = true;
-      let clickHandler = null;
+      let isDisabled = false;
+      let clickHandler = () => {
+        window.open("https://email-tracker.duckdns.org/dashboard", "_blank", "noopener,noreferrer");
+      };
       let title = "Open dashboard";
 
       if (matched) {
         const opens = Number(matched.totalOpenEvents || 0);
-        isDisabled = false;
         title = `Opens: ${opens}`;
         clickHandler = () => {
           const dashboardUrl = `${matched.baseUrl || "https://email-tracker.duckdns.org"}/dashboard?email_id=${encodeURIComponent(
@@ -430,13 +436,19 @@ function renderInboxBadges() {
         badge.dataset.stateKey = stateKey;
       }
 
-        badge.disabled = isDisabled;
+        badge.disabled = false;
+        badge.onmousedown = (event) => {
+          event.stopPropagation();
+          if (event instanceof MouseEvent) {
+            event.preventDefault();
+          }
+        };
         badge.onclick = (event) => {
           event.stopPropagation();
           if (event instanceof MouseEvent) {
             event.preventDefault();
           }
-          if (!isDisabled && clickHandler) {
+          if (clickHandler) {
             clickHandler();
           }
         };
@@ -448,6 +460,9 @@ function renderInboxBadges() {
 
 function findBadgeSlot(row) {
   return (
+    row.querySelector("span.bog")?.parentElement ||
+    row.querySelector("span.y2")?.parentElement ||
+    row.querySelector("span[email]")?.parentElement ||
     row.querySelector("td.xY .y6") ||
     row.querySelector("td.xY") ||
     row.querySelector("td.yX") ||
