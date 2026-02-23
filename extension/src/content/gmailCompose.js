@@ -87,46 +87,8 @@ function injectBadgeStyles() {
 function scanForComposeDialogs() {
   const dialogs = document.querySelectorAll('div[role="dialog"]');
   dialogs.forEach((dialog) => {
-    if (dialog.dataset.emailTrackerBound === "1") {
-      return;
-    }
-
-    dialog.dataset.emailTrackerBound = "1";
-    bindSendHook(dialog);
+    injectTrackingPixelIfNeeded(dialog);
   });
-}
-
-function bindSendHook(dialog) {
-  dialog.addEventListener(
-    "click",
-    async (event) => {
-      const target = event.target;
-      if (!(target instanceof Element)) {
-        return;
-      }
-
-      const sendButton = target.closest('div[role="button"],button');
-      if (!sendButton || !isSendButton(sendButton)) {
-        return;
-      }
-
-      await injectTrackingPixelIfNeeded(dialog);
-    },
-    true
-  );
-}
-
-function isSendButton(button) {
-  const label = [
-    button.getAttribute("data-tooltip"),
-    button.getAttribute("aria-label"),
-    button.textContent
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-
-  return label.includes("send") || button.getAttribute("data-tooltip-id") === "tt-c";
 }
 
 async function injectTrackingPixelIfNeeded(dialog) {
@@ -162,13 +124,13 @@ async function injectTrackingPixelIfNeeded(dialog) {
   const marker = document.createElement("div");
   marker.id = `snvTrackDiv-${response.emailId}`;
   marker.setAttribute("data-email-tracker-marker", "1");
-  marker.style.cssText = "max-height:1px;overflow:hidden;color:transparent;font-size:1px;line-height:1px;opacity:0;";
+  marker.style.cssText = "max-height:1px;overflow:hidden;color:transparent;font-size:1px;line-height:1px;";
   marker.textContent = `snv:${response.emailId}`;
 
   body.appendChild(marker);
   body.appendChild(img);
 
-  await chrome.runtime.sendMessage({
+  chrome.runtime.sendMessage({
     type: "tracker:logTrackedEmail",
     payload: {
       emailId: response.emailId,
@@ -177,6 +139,8 @@ async function injectTrackingPixelIfNeeded(dialog) {
       sentAt: response.sentAt,
       pixelUrl: response.pixelUrl
     }
+  }).catch(() => {
+    // no-op
   });
 
   refreshInboxBadgeData();

@@ -30,11 +30,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const emailId = crypto.randomUUID();
       const sentAt = new Date().toISOString();
       const recipient = (message.recipient || "unknown").trim();
-      const { [STORAGE_KEYS.TRACKER_BASE_URL]: rawBaseUrl } = await chrome.storage.local.get(
-        STORAGE_KEYS.TRACKER_BASE_URL
-      );
-
-      const baseUrl = normalizeBaseUrl(rawBaseUrl || DEFAULT_TRACKER_BASE_URL);
+      const baseUrl = DEFAULT_TRACKER_BASE_URL;
       const token = encodeTrackingToken({ user_id: userId, email_id: emailId, recipient, sent_at: sentAt });
       const pixelUrl = `${baseUrl}/t/${token}.gif`;
 
@@ -51,16 +47,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "tracker:getInboxBadgeData") {
       const {
         [STORAGE_KEYS.RECENT_EMAILS]: recentEmails = [],
-        [STORAGE_KEYS.TRACKER_BASE_URL]: trackerBaseUrl = DEFAULT_TRACKER_BASE_URL,
         [STORAGE_KEYS.DASHBOARD_TOKEN]: dashboardToken = ""
       } = await chrome.storage.local.get([
         STORAGE_KEYS.RECENT_EMAILS,
-        STORAGE_KEYS.TRACKER_BASE_URL,
         STORAGE_KEYS.DASHBOARD_TOKEN
       ]);
 
-      const enriched = await enrichRecentEmails(recentEmails, trackerBaseUrl, dashboardToken);
-      sendResponse({ ok: true, trackerBaseUrl, items: enriched });
+      const enriched = await enrichRecentEmails(recentEmails, DEFAULT_TRACKER_BASE_URL, dashboardToken);
+      sendResponse({ ok: true, trackerBaseUrl: DEFAULT_TRACKER_BASE_URL, items: enriched });
       return;
     }
 
@@ -68,21 +62,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const userId = await ensureUserId();
       const {
         [STORAGE_KEYS.RECENT_EMAILS]: recentEmails = [],
-        [STORAGE_KEYS.TRACKER_BASE_URL]: trackerBaseUrl = DEFAULT_TRACKER_BASE_URL,
         [STORAGE_KEYS.DASHBOARD_TOKEN]: dashboardToken = ""
       } = await chrome.storage.local.get([
         STORAGE_KEYS.RECENT_EMAILS,
-        STORAGE_KEYS.TRACKER_BASE_URL,
         STORAGE_KEYS.DASHBOARD_TOKEN
       ]);
 
-      const enrichedRecentEmails = await enrichRecentEmails(recentEmails, trackerBaseUrl, dashboardToken);
-      const debugItems = await getPopupDebugItems(enrichedRecentEmails, trackerBaseUrl, dashboardToken);
+      const enrichedRecentEmails = await enrichRecentEmails(recentEmails, DEFAULT_TRACKER_BASE_URL, dashboardToken);
+      const debugItems = await getPopupDebugItems(enrichedRecentEmails, DEFAULT_TRACKER_BASE_URL, dashboardToken);
 
       sendResponse({
         ok: true,
         userId,
-        trackerBaseUrl,
+        trackerBaseUrl: DEFAULT_TRACKER_BASE_URL,
         dashboardToken,
         recentEmails,
         enrichedRecentEmails,
@@ -93,9 +85,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
 
     if (message?.type === "tracker:updateTrackerBaseUrl") {
-      const baseUrl = normalizeBaseUrl(message.baseUrl || "");
-      await chrome.storage.local.set({ [STORAGE_KEYS.TRACKER_BASE_URL]: baseUrl });
-      sendResponse({ ok: true, trackerBaseUrl: baseUrl });
+      await chrome.storage.local.set({ [STORAGE_KEYS.TRACKER_BASE_URL]: DEFAULT_TRACKER_BASE_URL });
+      sendResponse({ ok: true, trackerBaseUrl: DEFAULT_TRACKER_BASE_URL });
       return;
     }
 
