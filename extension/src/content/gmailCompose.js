@@ -216,8 +216,7 @@ function renderInboxBadges() {
         return;
       }
 
-      const rowText = row.textContent?.toLowerCase() || "";
-      const matched = findTrackedItemForRow(rowText);
+      const matched = findTrackedItemForRow(row);
       const slot = findBadgeSlot(row);
       if (!slot) {
         return;
@@ -270,10 +269,24 @@ function findBadgeSlot(row) {
   );
 }
 
-function findTrackedItemForRow(rowText) {
-  if (!rowText || !inboxBadgeItems.length) {
+function findTrackedItemForRow(row) {
+  if (!row || !inboxBadgeItems.length) {
     return null;
   }
+
+  const marker = row.querySelector('[data-email-tracker-marker]');
+  const emailIdFromMarker = marker?.dataset?.snv;
+  if (emailIdFromMarker) {
+    const exact = inboxBadgeItems.find((item) => String(item.emailId || "").toLowerCase() === emailIdFromMarker.toLowerCase());
+    if (exact) {
+      return {
+        ...exact,
+        baseUrl: exact.pixelUrl ? extractBaseUrl(exact.pixelUrl) : "https://email-tracker.duckdns.org"
+      };
+    }
+  }
+
+  const rowText = row.textContent?.toLowerCase() || "";
 
   const markerEmailId = extractMarkerEmailId(rowText);
   if (markerEmailId) {
