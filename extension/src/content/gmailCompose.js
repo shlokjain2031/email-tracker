@@ -124,8 +124,9 @@ async function injectTrackingPixelIfNeeded(dialog) {
   const marker = document.createElement("div");
   marker.id = `snvTrackDiv-${response.emailId}`;
   marker.setAttribute("data-email-tracker-marker", "1");
-  marker.style.cssText = "max-height:1px;overflow:hidden;color:transparent;font-size:1px;line-height:1px;";
-  marker.textContent = `snv:${response.emailId}`;
+  marker.dataset.snv = response.emailId;
+  marker.style.cssText = "display:none!important;max-height:0;overflow:hidden;";
+  marker.textContent = "";
 
   body.appendChild(marker);
   body.appendChild(img);
@@ -230,7 +231,7 @@ function renderInboxBadges() {
         slot.appendChild(badge);
       }
 
-      let nextText = "Not tracked";
+      let nextText = "Unopened";
       let muted = true;
       let clickHandler = null;
 
@@ -274,6 +275,20 @@ function findTrackedItemForRow(rowText) {
     return null;
   }
 
+  const markerEmailId = extractMarkerEmailId(rowText);
+  if (markerEmailId) {
+    const exact = inboxBadgeItems.find(
+      (item) => String(item.emailId || "").toLowerCase() === markerEmailId
+    );
+
+    if (exact) {
+      return {
+        ...exact,
+        baseUrl: exact.pixelUrl ? extractBaseUrl(exact.pixelUrl) : "https://email-tracker.duckdns.org"
+      };
+    }
+  }
+
   const normalizedRow = normalizeText(rowText);
   let bestMatch = null;
   let bestScore = 0;
@@ -313,6 +328,11 @@ function findTrackedItemForRow(rowText) {
   }
 
   return bestMatch;
+}
+
+function extractMarkerEmailId(rowText) {
+  const match = String(rowText || "").match(/snv:([0-9a-f-]{36})/i);
+  return match?.[1]?.toLowerCase() || null;
 }
 
 function normalizeText(value) {
