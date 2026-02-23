@@ -421,8 +421,8 @@ function renderInboxBadges() {
         };
       }
 
-      const stateKey = `${isDisabled ? "1" : "0"}|${matched?.emailId || "none"}|${title}`;
-      if (badge.dataset.stateKey !== stateKey) {
+        const stateKey = `${isDisabled ? "1" : "0"}|${matched?.emailId || "none"}|${title}`;
+        if (badge.dataset.stateKey !== stateKey) {
         badge.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17h18v2H3v-2zm2-2l4-5 4 3 5-7 2 1.4-6.2 8.6-4.1-3.1L6.6 16.8 5 15z"/></svg>';
         badge.classList.toggle("et-disabled", isDisabled);
         badge.title = title;
@@ -430,7 +430,16 @@ function renderInboxBadges() {
         badge.dataset.stateKey = stateKey;
       }
 
-      badge.onclick = clickHandler;
+        badge.disabled = isDisabled;
+        badge.onclick = (event) => {
+          event.stopPropagation();
+          if (event instanceof MouseEvent) {
+            event.preventDefault();
+          }
+          if (!isDisabled && clickHandler) {
+            clickHandler();
+          }
+        };
     });
   } finally {
     isRenderingBadges = false;
