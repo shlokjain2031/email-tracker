@@ -160,9 +160,10 @@ async function injectTrackingPixelIfNeeded(dialog) {
   img.style.cssText = "width:1px;height:1px;opacity:0;display:block;border:0;";
 
   const marker = document.createElement("div");
+  marker.id = `snvTrackDiv-${response.emailId}`;
   marker.setAttribute("data-email-tracker-marker", "1");
-  marker.style.cssText = "display:none!important;max-height:0;overflow:hidden;color:transparent;font-size:1px;line-height:1px;";
-  marker.textContent = `et:${response.emailId}`;
+  marker.style.cssText = "max-height:1px;overflow:hidden;color:transparent;font-size:1px;line-height:1px;opacity:0;";
+  marker.textContent = `snv:${response.emailId}`;
 
   body.appendChild(marker);
   body.appendChild(img);

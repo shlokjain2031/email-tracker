@@ -45,6 +45,17 @@ const findRecentDuplicateStmt = db.prepare(`
   LIMIT 1
 `);
 
+const findLikelySenderFingerprintStmt = db.prepare(`
+  SELECT id
+  FROM open_events
+  WHERE email_id = ?
+    AND IFNULL(ip_address, '') = IFNULL(?, '')
+    AND IFNULL(user_agent, '') = IFNULL(?, '')
+    AND opened_at <= ?
+  ORDER BY opened_at ASC
+  LIMIT 1
+`);
+
 const insertOpenEventStmt = db.prepare(`
   INSERT INTO open_events (
     email_id,
@@ -95,11 +106,28 @@ const txn = db.transaction((input: RecordOpenInput): RecordOpenResult => {
   const isDuplicate = Boolean(duplicateRow);
   const sentAtMs = Date.parse(input.payload.sent_at);
   const openedAtMs = Date.parse(input.openedAtIso);
-  const isSuppressedLikelySender =
+  const isWithinInitialSenderWindow =
     Number.isFinite(sentAtMs) &&
     Number.isFinite(openedAtMs) &&
     openedAtMs >= sentAtMs &&
     openedAtMs - sentAtMs <= SELF_OPEN_GUARD_MS;
+
+  const senderWindowUpperBoundIso = Number.isFinite(sentAtMs)
+    ? new Date(sentAtMs + SELF_OPEN_GUARD_MS).toISOString()
+    : null;
+
+  const hasStrongFingerprint = Boolean(input.ipAddress && input.userAgent);
+  const priorLikelySenderFingerprint =
+    hasStrongFingerprint && senderWindowUpperBoundIso
+      ? (findLikelySenderFingerprintStmt.get(
+          input.payload.email_id,
+          input.ipAddress,
+          input.userAgent,
+          senderWindowUpperBoundIso
+        ) as { id: number } | undefined)
+      : undefined;
+
+  const isSuppressedLikelySender = isWithinInitialSenderWindow || Boolean(priorLikelySenderFingerprint);
 
   const geo = resolveGeoFromIp(input.ipAddress);
 
@@ -180,11 +208,38 @@ function runWithDatabase(input: RecordOpenInput, database: Database.Database): R
     const isDuplicate = Boolean(duplicateRow);
     const sentAtMs = Date.parse(txInput.payload.sent_at);
     const openedAtMs = Date.parse(txInput.openedAtIso);
-    const isSuppressedLikelySender =
+    const isWithinInitialSenderWindow =
       Number.isFinite(sentAtMs) &&
       Number.isFinite(openedAtMs) &&
       openedAtMs >= sentAtMs &&
       openedAtMs - sentAtMs <= SELF_OPEN_GUARD_MS;
+
+    const senderWindowUpperBoundIso = Number.isFinite(sentAtMs)
+      ? new Date(sentAtMs + SELF_OPEN_GUARD_MS).toISOString()
+      : null;
+
+    const hasStrongFingerprint = Boolean(txInput.ipAddress && txInput.userAgent);
+    const priorLikelySenderFingerprint =
+      hasStrongFingerprint && senderWindowUpperBoundIso
+        ? (database
+            .prepare(
+              `
+      SELECT id
+      FROM open_events
+      WHERE email_id = ?
+        AND IFNULL(ip_address, '') = IFNULL(?, '')
+        AND IFNULL(user_agent, '') = IFNULL(?, '')
+        AND opened_at <= ?
+      ORDER BY opened_at ASC
+      LIMIT 1
+    `
+            )
+            .get(txInput.payload.email_id, txInput.ipAddress, txInput.userAgent, senderWindowUpperBoundIso) as
+            | { id: number }
+            | undefined)
+        : undefined;
+
+    const isSuppressedLikelySender = isWithinInitialSenderWindow || Boolean(priorLikelySenderFingerprint);
     const geo = resolveGeoFromIp(txInput.ipAddress);
 
     database

@@ -14,6 +14,7 @@ interface TrackedEmailRow {
   sent_at: string;
   unique_open_count: number;
   total_open_events: number;
+  raw_open_events: number;
   last_opened_at: string | null;
   created_at: string;
 }
@@ -45,14 +46,16 @@ const listEmailsStmt = db.prepare(`
     te.sent_at,
     te.open_count AS unique_open_count,
     COALESCE(oe.total_open_events, 0) AS total_open_events,
+    COALESCE(oe.raw_open_events, 0) AS raw_open_events,
     oe.last_opened_at,
     te.created_at
   FROM tracked_emails te
   LEFT JOIN (
     SELECT
       email_id,
-      COUNT(*) AS total_open_events,
-      MAX(opened_at) AS last_opened_at
+      COUNT(*) AS raw_open_events,
+      SUM(CASE WHEN is_duplicate = 0 THEN 1 ELSE 0 END) AS total_open_events,
+      MAX(CASE WHEN is_duplicate = 0 THEN opened_at ELSE NULL END) AS last_opened_at
     FROM open_events
     GROUP BY email_id
   ) oe ON oe.email_id = te.email_id
@@ -99,6 +102,7 @@ dashboardRouter.get("/dashboard/api/emails", (req, res) => {
     sent_at: row.sent_at,
     unique_open_count: row.unique_open_count,
     total_open_events: row.total_open_events,
+    raw_open_events: row.raw_open_events,
     last_opened_at: row.last_opened_at,
     opened: row.unique_open_count > 0,
     created_at: row.created_at

@@ -112,6 +112,16 @@
         background: #7c3aed;
       }
 
+      .suppressed-badge {
+        display: inline-block;
+        border-radius: 999px;
+        padding: 4px 10px;
+        font-size: 12px;
+        font-weight: 600;
+        background: #fee2e2;
+        color: #991b1b;
+      }
+
       .filter-note {
         font-size: 12px;
       }
@@ -139,7 +149,8 @@
               <th>Recipient</th>
               <th>Sent At (IST)</th>
               <th>Last Opened (IST)</th>
-              <th>Opens</th>
+              <th>Counted Opens</th>
+              <th>Suppressed</th>
               <th>Status</th>
             </tr>
           </thead>
@@ -256,7 +267,7 @@
 
         emailsBody.innerHTML = "";
         if (!items.length) {
-          emailsBody.innerHTML = '<tr><td colspan="6" class="muted">No tracked emails yet.</td></tr>';
+          emailsBody.innerHTML = '<tr><td colspan="7" class="muted">No tracked emails yet.</td></tr>';
           setStatus("No email rows yet.");
           return;
         }
@@ -264,6 +275,9 @@
         for (const item of items) {
           const sentAt = formatIst(item.sent_at);
           const lastOpenedAt = item.last_opened_at ? formatIst(item.last_opened_at) : "-";
+          const countedOpens = Number(item.total_open_events || 0);
+          const rawEvents = Number(item.raw_open_events || 0);
+          const suppressedEvents = Math.max(0, rawEvents - countedOpens);
           const tr = document.createElement("tr");
           tr.innerHTML = `
             <td class="mono">${escapeHtml(item.email_id)}</td>
@@ -272,9 +286,10 @@
             <td>${escapeHtml(lastOpenedAt)}</td>
             <td>
               <button class="opens-badge" data-email-id="${escapeHtml(item.email_id)}" type="button">
-                Opens: ${item.total_open_events}
+                Opens: ${countedOpens}
               </button>
             </td>
+            <td><span class="suppressed-badge">${suppressedEvents}</span></td>
             <td>${item.opened ? `opened (unique ${item.unique_open_count})` : "unopened"}</td>
           `;
           emailsBody.appendChild(tr);
