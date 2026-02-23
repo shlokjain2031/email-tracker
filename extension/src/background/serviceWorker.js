@@ -30,11 +30,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const emailId = crypto.randomUUID();
       const sentAt = new Date().toISOString();
       const recipient = (message.recipient || "unknown").trim();
+      const senderEmail = String(message.senderEmail || "").trim().toLowerCase() || null;
       const baseUrl = DEFAULT_TRACKER_BASE_URL;
-      const token = encodeTrackingToken({ user_id: userId, email_id: emailId, recipient, sent_at: sentAt });
+      const token = encodeTrackingToken({
+        user_id: userId,
+        email_id: emailId,
+        recipient,
+        sender_email: senderEmail ?? undefined,
+        sent_at: sentAt
+      });
       const pixelUrl = `${baseUrl}/t/${token}.gif`;
 
-      sendResponse({ ok: true, userId, emailId, sentAt, recipient, token, pixelUrl, baseUrl });
+      sendResponse({ ok: true, userId, emailId, sentAt, recipient, senderEmail, token, pixelUrl, baseUrl });
       return;
     }
 
@@ -127,6 +134,7 @@ async function appendRecentTrackedEmail(payload) {
     {
       emailId: payload.emailId,
       recipient: payload.recipient || "unknown",
+      senderEmail: payload.senderEmail || "",
       subject: payload.subject || "",
       sentAt: payload.sentAt,
       pixelUrl: payload.pixelUrl
@@ -187,6 +195,7 @@ async function enrichRecentEmails(recentEmails, trackerBaseUrl, dashboardToken) 
       return {
         ...item,
         recipient: matched?.recipient || item.recipient || "unknown",
+        senderEmail: matched?.sender_email || item.senderEmail || "",
         totalOpenEvents: matched?.total_open_events ?? 0,
         uniqueOpenCount: matched?.unique_open_count ?? 0,
         lastOpenedAt: matched?.last_opened_at ?? null

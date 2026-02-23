@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Router } from "express";
-import { getDb } from "../db/sqlite.js";
+import { getDb, initDb } from "../db/sqlite.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,6 +11,7 @@ interface TrackedEmailRow {
   email_id: string;
   user_id: string;
   recipient: string;
+  sender_email: string | null;
   sent_at: string;
   unique_open_count: number;
   total_open_events: number;
@@ -37,12 +38,14 @@ interface OpenEventRow {
 }
 
 const db = getDb();
+initDb(db);
 
 const listEmailsStmt = db.prepare(`
   SELECT
     te.email_id,
     te.user_id,
     te.recipient,
+    te.sender_email,
     te.sent_at,
     te.open_count AS unique_open_count,
     COALESCE(oe.total_open_events, 0) AS total_open_events,
@@ -99,6 +102,7 @@ dashboardRouter.get("/dashboard/api/emails", (req, res) => {
     email_id: row.email_id,
     user_id: row.user_id,
     recipient: row.recipient,
+    sender_email: row.sender_email,
     sent_at: row.sent_at,
     unique_open_count: row.unique_open_count,
     total_open_events: row.total_open_events,

@@ -145,6 +145,7 @@
         <table>
           <thead>
             <tr>
+              <th>Sender</th>
               <th>Recipient</th>
               <th>Sent Date (IST)</th>
               <th>Sent Time (IST)</th>
@@ -268,7 +269,7 @@
 
         emailsBody.innerHTML = "";
         if (!items.length) {
-          emailsBody.innerHTML = '<tr><td colspan="8" class="muted">No tracked emails yet.</td></tr>';
+          emailsBody.innerHTML = '<tr><td colspan="9" class="muted">No tracked emails yet.</td></tr>';
           setStatus("No email rows yet.");
           return;
         }
@@ -281,6 +282,7 @@
           const suppressedEvents = Math.max(0, rawEvents - countedOpens);
           const tr = document.createElement("tr");
           tr.innerHTML = `
+            <td>${escapeHtml(item.sender_email || "-")}</td>
             <td>${escapeHtml(item.recipient)}</td>
             <td>${escapeHtml(sentAt.date)}</td>
             <td>${escapeHtml(sentAt.time)}</td>

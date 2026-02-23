@@ -31,6 +31,7 @@ export function decodeTrackingToken(token: string): TrackingPayload {
     user_id: payload.user_id,
     email_id: payload.email_id,
     recipient: payload.recipient,
+    sender_email: payload.sender_email,
     sent_at: payload.sent_at
   };
 }

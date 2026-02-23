@@ -2,6 +2,7 @@ export interface TrackingPayload {
   user_id: string;
   email_id: string;
   recipient: string;
+  sender_email?: string;
   sent_at: string;
 }
 
@@ -9,6 +10,7 @@ export interface TrackedEmail {
   email_id: string;
   user_id: string;
   recipient: string;
+  sender_email?: string | null;
   sent_at: string;
   open_count: number;
   created_at: string;

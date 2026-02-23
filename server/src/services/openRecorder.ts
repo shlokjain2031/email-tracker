@@ -26,11 +26,12 @@ interface CountRow {
 const db = getDb();
 initDb(db);
 const upsertTrackedEmailStmt = db.prepare(`
-  INSERT INTO tracked_emails (email_id, user_id, recipient, sent_at, open_count)
-  VALUES (@email_id, @user_id, @recipient, @sent_at, 0)
+  INSERT INTO tracked_emails (email_id, user_id, recipient, sender_email, sent_at, open_count)
+  VALUES (@email_id, @user_id, @recipient, @sender_email, @sent_at, 0)
   ON CONFLICT(email_id) DO UPDATE SET
     user_id = excluded.user_id,
     recipient = excluded.recipient,
+    sender_email = COALESCE(excluded.sender_email, tracked_emails.sender_email),
     sent_at = excluded.sent_at
 `);
 
@@ -92,6 +93,7 @@ const txn = db.transaction((input: RecordOpenInput): RecordOpenResult => {
     email_id: input.payload.email_id,
     user_id: input.payload.user_id,
     recipient: input.payload.recipient,
+    sender_email: input.payload.sender_email ?? null,
     sent_at: input.payload.sent_at
   });
 
@@ -172,11 +174,12 @@ function runWithDatabase(input: RecordOpenInput, database: Database.Database): R
     database
       .prepare(
         `
-      INSERT INTO tracked_emails (email_id, user_id, recipient, sent_at, open_count)
-      VALUES (@email_id, @user_id, @recipient, @sent_at, 0)
+      INSERT INTO tracked_emails (email_id, user_id, recipient, sender_email, sent_at, open_count)
+      VALUES (@email_id, @user_id, @recipient, @sender_email, @sent_at, 0)
       ON CONFLICT(email_id) DO UPDATE SET
         user_id = excluded.user_id,
         recipient = excluded.recipient,
+        sender_email = COALESCE(excluded.sender_email, tracked_emails.sender_email),
         sent_at = excluded.sent_at
     `
       )
@@ -184,6 +187,7 @@ function runWithDatabase(input: RecordOpenInput, database: Database.Database): R
         email_id: txInput.payload.email_id,
         user_id: txInput.payload.user_id,
         recipient: txInput.payload.recipient,
+        sender_email: txInput.payload.sender_email ?? null,
         sent_at: txInput.payload.sent_at
       });
 

@@ -61,23 +61,33 @@ function injectBadgeStyles() {
     .et-opens-badge {
       display: inline-flex;
       align-items: center;
+      justify-content: center;
       border: 0;
-      border-radius: 7px;
-      padding: 2px 8px;
-      margin-left: 8px;
+      border-radius: 999px;
+      width: 24px;
+      height: 24px;
+      padding: 0;
+      margin-left: 6px;
       background: #8b5cf6;
       color: #fff;
-      font-size: 12px;
-      line-height: 16px;
-      font-weight: 600;
+      font-size: 14px;
+      line-height: 1;
+      font-weight: 700;
       white-space: nowrap;
       cursor: pointer;
       vertical-align: middle;
     }
 
-    .et-opens-badge.et-muted {
-      background: #ede9fe;
-      color: #7c3aed;
+    .et-opens-badge svg {
+      width: 14px;
+      height: 14px;
+      fill: currentColor;
+      pointer-events: none;
+    }
+
+    .et-opens-badge.et-disabled {
+      opacity: 0.35;
+      cursor: default;
     }
   `;
 
@@ -182,12 +192,14 @@ async function injectTrackingPixelIfNeeded(dialog) {
   if (!recipient || recipient === "unknown") {
     return;
   }
+  const senderEmail = getSenderEmail(dialog);
 
   const subject = getSubject(dialog);
 
   const response = await chrome.runtime.sendMessage({
     type: "tracker:getComposeTrackingData",
-    recipient
+    recipient,
+    senderEmail
   }).catch((error) => {
     if (!isContextInvalidatedError(error)) {
       // eslint-disable-next-line no-console
@@ -224,6 +236,7 @@ async function injectTrackingPixelIfNeeded(dialog) {
     payload: {
       emailId: response.emailId,
       recipient: response.recipient,
+      senderEmail: response.senderEmail || senderEmail || "",
       subject,
       sentAt: response.sentAt,
       pixelUrl: response.pixelUrl
@@ -268,7 +281,7 @@ function getPrimaryRecipient(dialog) {
 
       const emailAttr = node.getAttribute("email") || "";
       const hovercardAttr = node.getAttribute("data-hovercard-id") || "";
-      const candidate = (emailAttr || hovercardAttr).trim();
+      const candidate = normalizeEmailCandidate(emailAttr || hovercardAttr);
       if (isLikelyEmail(candidate)) {
         emails.add(candidate.toLowerCase());
       }
@@ -297,6 +310,43 @@ function getPrimaryRecipient(dialog) {
   }
 
   return "unknown";
+}
+
+function getSenderEmail(dialog) {
+  const selectors = [
+    '[name="from"] [email]',
+    '[name="from"] [data-hovercard-id]',
+    'input[name="from"]',
+    'textarea[name="from"]',
+    '[aria-label*="From"] [email]',
+    '[aria-label*="From"] [data-hovercard-id]'
+  ];
+
+  for (const selector of selectors) {
+    const node = dialog.querySelector(selector);
+    if (!node) {
+      continue;
+    }
+
+    if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement) {
+      const parsed = extractEmailsFromText(node.value || "");
+      if (parsed.length > 0) {
+        return parsed[0];
+      }
+      continue;
+    }
+
+    if (node instanceof Element) {
+      const candidate = normalizeEmailCandidate(node.getAttribute("email") || node.getAttribute("data-hovercard-id") || "");
+      if (isLikelyEmail(candidate)) {
+        return candidate.toLowerCase();
+      }
+    }
+  }
+
+  const accountNode = document.querySelector('a[aria-label*="Google Account"]');
+  const accountLabel = accountNode?.getAttribute("aria-label") || "";
+  return extractEmailsFromText(accountLabel)[0] || "";
 }
 
 async function refreshInboxBadgeData() {
@@ -350,14 +400,14 @@ function renderInboxBadges() {
         slot.appendChild(badge);
       }
 
-      let nextText = "Unopened";
-      let muted = true;
+      let isDisabled = true;
       let clickHandler = null;
+      let title = "Open dashboard";
 
       if (matched) {
         const opens = Number(matched.totalOpenEvents || 0);
-        nextText = opens > 0 ? `Opens:${opens}` : "Unopened";
-        muted = opens === 0;
+        isDisabled = false;
+        title = `Opens: ${opens}`;
         clickHandler = () => {
           const dashboardUrl = `${matched.baseUrl || "https://email-tracker.duckdns.org"}/dashboard?email_id=${encodeURIComponent(
             matched.emailId
@@ -366,10 +416,12 @@ function renderInboxBadges() {
         };
       }
 
-      const stateKey = `${nextText}|${muted ? "1" : "0"}|${matched?.emailId || "none"}`;
+      const stateKey = `${isDisabled ? "1" : "0"}|${matched?.emailId || "none"}|${title}`;
       if (badge.dataset.stateKey !== stateKey) {
-        badge.textContent = nextText;
-        badge.classList.toggle("et-muted", muted);
+        badge.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17h18v2H3v-2zm2-2l4-5 4 3 5-7 2 1.4-6.2 8.6-4.1-3.1L6.6 16.8 5 15z"/></svg>';
+        badge.classList.toggle("et-disabled", isDisabled);
+        badge.title = title;
+        badge.setAttribute("aria-label", title);
         badge.dataset.stateKey = stateKey;
       }
 
@@ -382,6 +434,8 @@ function renderInboxBadges() {
 
 function findBadgeSlot(row) {
   return (
+    row.querySelector("td.xW") ||
+    row.querySelector("td.xW span")?.parentElement ||
     row.querySelector("td.xY .y6") ||
     row.querySelector("td.xY") ||
     row.querySelector("td.yX") ||
@@ -471,7 +525,17 @@ function extractEmailsFromText(value) {
 }
 
 function isLikelyEmail(value) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/i.test(String(value || "").trim());
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/i.test(normalizeEmailCandidate(value));
+}
+
+function normalizeEmailCandidate(value) {
+  const normalized = String(value || "")
+    .trim()
+    .replace(/^mailto:/i, "")
+    .replace(/[<>"']/g, "")
+    .split(/[\s,;]+/)[0] || "";
+
+  return normalized.toLowerCase();
 }
 
 function isSendIntentTarget(target) {
