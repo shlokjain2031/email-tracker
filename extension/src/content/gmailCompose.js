@@ -89,6 +89,9 @@ function injectBadgeStyles() {
       opacity: 0.35;
       cursor: default;
     }
+    .et-opens-slot {
+      position: relative;
+    }
   `;
 
   document.head.appendChild(style);
@@ -392,6 +395,8 @@ function renderInboxBadges() {
         return;
       }
 
+      slot.classList.add("et-opens-slot");
+
       let badge = slot.querySelector(".et-opens-badge");
       if (!badge) {
         badge = document.createElement("button");
@@ -434,11 +439,11 @@ function renderInboxBadges() {
 
 function findBadgeSlot(row) {
   return (
-    row.querySelector("td.xW") ||
-    row.querySelector("td.xW span")?.parentElement ||
     row.querySelector("td.xY .y6") ||
     row.querySelector("td.xY") ||
     row.querySelector("td.yX") ||
+    row.querySelector("td.xW") ||
+    row.querySelector("td.xW span")?.parentElement ||
     row.querySelector("td")
   );
 }
