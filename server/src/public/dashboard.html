@@ -313,10 +313,12 @@
         const badges = emailsBody.querySelectorAll(".opens-badge");
 
         badges.forEach((badge) => {
-          badge.addEventListener("click", () => {
+          badge.addEventListener("click", async () => {
             const emailId = badge.getAttribute("data-email-id") || "";
-            const nextUrl = `/dashboard?tab=opens&email_id=${encodeURIComponent(emailId)}`;
-            window.open(nextUrl, "_blank", "noopener,noreferrer");
+            emailFilterInput.value = emailId;
+            setActiveTab("opens");
+            await loadOpenEvents(emailId);
+            setFilterNote(emailId);
           });
         });
       }
