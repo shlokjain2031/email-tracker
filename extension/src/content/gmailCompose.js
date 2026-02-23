@@ -87,6 +87,11 @@ function injectBadgeStyles() {
 function scanForComposeDialogs() {
   const dialogs = document.querySelectorAll('div[role="dialog"]');
   dialogs.forEach((dialog) => {
+    if (dialog instanceof HTMLElement && dialog.dataset.emailTrackerBound !== "1") {
+      dialog.dataset.emailTrackerBound = "1";
+      bindComposeDialog(dialog);
+    }
+
     injectTrackingPixelIfNeeded(dialog).catch((error) => {
       if (!isContextInvalidatedError(error)) {
         // eslint-disable-next-line no-console
@@ -94,6 +99,69 @@ function scanForComposeDialogs() {
       }
     });
   });
+}
+
+function bindComposeDialog(dialog) {
+  const triggerInjection = () => {
+    injectTrackingPixelIfNeeded(dialog).catch((error) => {
+      if (!isContextInvalidatedError(error)) {
+        // eslint-disable-next-line no-console
+        console.warn("Email tracker dialog inject failed:", error);
+      }
+    });
+  };
+
+  dialog.addEventListener(
+    "mousedown",
+    (event) => {
+      if (isSendIntentTarget(event.target)) {
+        triggerInjection();
+      }
+    },
+    true
+  );
+
+  dialog.addEventListener(
+    "click",
+    (event) => {
+      if (isSendIntentTarget(event.target)) {
+        triggerInjection();
+      }
+    },
+    true
+  );
+
+  dialog.addEventListener(
+    "keydown",
+    (event) => {
+      const keyboardEvent = event;
+      if (!(keyboardEvent instanceof KeyboardEvent)) {
+        return;
+      }
+
+      const isEnter = keyboardEvent.key === "Enter";
+      const hasSendModifier = keyboardEvent.ctrlKey || keyboardEvent.metaKey;
+      if (isEnter && hasSendModifier) {
+        triggerInjection();
+      }
+    },
+    true
+  );
+
+  dialog.addEventListener(
+    "input",
+    (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        return;
+      }
+
+      if (target.closest('[aria-label="To"], [name="to"]')) {
+        triggerInjection();
+      }
+    },
+    true
+  );
 }
 
 async function injectTrackingPixelIfNeeded(dialog) {
@@ -111,6 +179,9 @@ async function injectTrackingPixelIfNeeded(dialog) {
   }
 
   const recipient = getPrimaryRecipient(dialog);
+  if (!recipient || recipient === "unknown") {
+    return;
+  }
 
   const subject = getSubject(dialog);
 
@@ -401,6 +472,28 @@ function extractEmailsFromText(value) {
 
 function isLikelyEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/i.test(String(value || "").trim());
+}
+
+function isSendIntentTarget(target) {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+
+  const button = target.closest('div[role="button"],button');
+  if (!button) {
+    return false;
+  }
+
+  const label = [
+    button.getAttribute("data-tooltip"),
+    button.getAttribute("aria-label"),
+    button.textContent
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return label.includes("send") || button.getAttribute("data-tooltip-id") === "tt-c";
 }
 
 function normalizeText(value) {

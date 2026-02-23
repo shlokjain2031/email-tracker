@@ -145,10 +145,11 @@
         <table>
           <thead>
             <tr>
-              <th>Email ID</th>
               <th>Recipient</th>
-              <th>Sent At (IST)</th>
-              <th>Last Opened (IST)</th>
+              <th>Sent Date (IST)</th>
+              <th>Sent Time (IST)</th>
+              <th>Last Opened Date (IST)</th>
+              <th>Last Opened Time (IST)</th>
               <th>Counted Opens</th>
               <th>Suppressed</th>
               <th>Status</th>
@@ -171,8 +172,8 @@
           <thead>
             <tr>
               <th>ID</th>
-              <th>Email ID</th>
-              <th>Opened At (IST)</th>
+              <th>Opened Date (IST)</th>
+              <th>Opened Time (IST)</th>
               <th>IP</th>
               <th>UA</th>
               <th>Geo</th>
@@ -267,23 +268,24 @@
 
         emailsBody.innerHTML = "";
         if (!items.length) {
-          emailsBody.innerHTML = '<tr><td colspan="7" class="muted">No tracked emails yet.</td></tr>';
+          emailsBody.innerHTML = '<tr><td colspan="8" class="muted">No tracked emails yet.</td></tr>';
           setStatus("No email rows yet.");
           return;
         }
 
         for (const item of items) {
-          const sentAt = formatIst(item.sent_at);
-          const lastOpenedAt = item.last_opened_at ? formatIst(item.last_opened_at) : "-";
+          const sentAt = formatIstParts(item.sent_at);
+          const lastOpenedAt = formatIstParts(item.last_opened_at);
           const countedOpens = Number(item.total_open_events || 0);
           const rawEvents = Number(item.raw_open_events || 0);
           const suppressedEvents = Math.max(0, rawEvents - countedOpens);
           const tr = document.createElement("tr");
           tr.innerHTML = `
-            <td class="mono">${escapeHtml(item.email_id)}</td>
             <td>${escapeHtml(item.recipient)}</td>
-            <td>${escapeHtml(sentAt)}</td>
-            <td>${escapeHtml(lastOpenedAt)}</td>
+            <td>${escapeHtml(sentAt.date)}</td>
+            <td>${escapeHtml(sentAt.time)}</td>
+            <td>${escapeHtml(lastOpenedAt.date)}</td>
+            <td>${escapeHtml(lastOpenedAt.time)}</td>
             <td>
               <button class="opens-badge" data-email-id="${escapeHtml(item.email_id)}" type="button">
                 Opens: ${countedOpens}
@@ -336,12 +338,13 @@
         }
 
         for (const item of items) {
+          const openedAt = formatIstParts(item.opened_at);
           const geo = [item.geo_city, item.geo_region, item.geo_country].filter(Boolean).join(", ");
           const tr = document.createElement("tr");
           tr.innerHTML = `
             <td>${item.id}</td>
-            <td class="mono">${escapeHtml(item.email_id)}</td>
-            <td>${escapeHtml(formatIst(item.opened_at))}</td>
+            <td>${escapeHtml(openedAt.date)}</td>
+            <td>${escapeHtml(openedAt.time)}</td>
             <td>${escapeHtml(item.ip_address || "")}</td>
             <td class="mono">${escapeHtml(item.user_agent || "")}</td>
             <td>${escapeHtml(geo)}</td>
@@ -367,29 +370,33 @@
         statusNode.style.color = isError ? "#b91c1c" : "#6b7280";
       }
 
-      function formatIst(value) {
+      function formatIstParts(value) {
         if (!value) {
-          return "-";
+          return { date: "-", time: "-" };
         }
 
         const date = new Date(value);
         if (Number.isNaN(date.getTime())) {
-          return String(value);
+          return { date: String(value), time: "-" };
         }
 
         const parts = new Intl.DateTimeFormat("en-GB", {
           timeZone: "Asia/Kolkata",
           day: "2-digit",
           month: "2-digit",
-          year: "2-digit",
+          year: "numeric",
           hour: "2-digit",
           minute: "2-digit",
+          second: "2-digit",
           hour12: false
         }).formatToParts(date);
 
         const get = (type) => parts.find((p) => p.type === type)?.value || "00";
 
-        return `${get("day")}-${get("month")}-${get("year")}::${get("hour")}-${get("minute")}`;
+        return {
+          date: `${get("day")}-${get("month")}-${get("year")}`,
+          time: `${get("hour")}:${get("minute")}:${get("second")}`
+        };
       }
 
       function escapeHtml(value) {
