@@ -87,11 +87,20 @@ function injectBadgeStyles() {
 function scanForComposeDialogs() {
   const dialogs = document.querySelectorAll('div[role="dialog"]');
   dialogs.forEach((dialog) => {
-    injectTrackingPixelIfNeeded(dialog);
+    injectTrackingPixelIfNeeded(dialog).catch((error) => {
+      if (!isContextInvalidatedError(error)) {
+        // eslint-disable-next-line no-console
+        console.warn("Email tracker inject failed:", error);
+      }
+    });
   });
 }
 
 async function injectTrackingPixelIfNeeded(dialog) {
+  if (!isRuntimeAvailable()) {
+    return;
+  }
+
   const body = findComposeBody(dialog);
   if (!body) {
     return;
@@ -108,6 +117,13 @@ async function injectTrackingPixelIfNeeded(dialog) {
   const response = await chrome.runtime.sendMessage({
     type: "tracker:getComposeTrackingData",
     recipient
+  }).catch((error) => {
+    if (!isContextInvalidatedError(error)) {
+      // eslint-disable-next-line no-console
+      console.warn("Email tracker getComposeTrackingData failed:", error);
+    }
+
+    return null;
   });
 
   if (!response?.ok) {
@@ -417,4 +433,13 @@ function extractBaseUrl(pixelUrl) {
   } catch {
     return "https://email-tracker.duckdns.org";
   }
+}
+
+function isRuntimeAvailable() {
+  return typeof chrome !== "undefined" && Boolean(chrome.runtime?.id);
+}
+
+function isContextInvalidatedError(error) {
+  const message = String(error?.message || error || "");
+  return message.toLowerCase().includes("extension context invalidated");
 }
