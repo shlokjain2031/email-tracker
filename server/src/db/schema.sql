@@ -25,9 +25,23 @@ CREATE TABLE IF NOT EXISTS open_events (
   longitude REAL,
   device_type TEXT NOT NULL DEFAULT 'other' CHECK (device_type IN ('phone', 'computer', 'other')),
   is_duplicate INTEGER NOT NULL DEFAULT 0 CHECK (is_duplicate IN (0, 1)),
+  is_sender_suppressed INTEGER NOT NULL DEFAULT 0 CHECK (is_sender_suppressed IN (0, 1)),
+  suppression_reason TEXT,
+  FOREIGN KEY (email_id) REFERENCES tracked_emails(email_id)
+);
+
+CREATE TABLE IF NOT EXISTS sender_heartbeats (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  sender_email TEXT,
+  seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+  ip_address TEXT,
+  user_agent TEXT,
   FOREIGN KEY (email_id) REFERENCES tracked_emails(email_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_tracked_emails_user_id ON tracked_emails(user_id);
 CREATE INDEX IF NOT EXISTS idx_open_events_email_id_opened_at ON open_events(email_id, opened_at DESC);
 CREATE INDEX IF NOT EXISTS idx_open_events_dedupe_lookup ON open_events(email_id, ip_address, user_agent, opened_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sender_heartbeats_lookup ON sender_heartbeats(email_id, ip_address, user_agent, seen_at DESC);

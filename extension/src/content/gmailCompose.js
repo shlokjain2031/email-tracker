@@ -2,11 +2,15 @@ const TRACKER_PIXEL_MARKER = "data-email-tracker-pixel";
 const BADGE_REFRESH_MS = 10_000;
 const MUTATION_DEBOUNCE_MS = 250;
 const MAX_ROWS_TO_RENDER = 120;
+const HEARTBEAT_SCAN_MS = 5_000;
+const HEARTBEAT_LOCAL_COOLDOWN_MS = 5_000;
+const MAX_HEARTBEATS_PER_SCAN = 10;
 
 let inboxBadgeItems = [];
 let lastInboxRefreshAt = 0;
 let mutationWorkTimer = null;
 let isRenderingBadges = false;
+const lastHeartbeatByEmailId = new Map();
 
 init();
 
@@ -17,6 +21,7 @@ function init() {
   scanForComposeDialogs();
   refreshInboxBadgeData();
   setInterval(refreshInboxBadgeData, BADGE_REFRESH_MS);
+  setInterval(scanAndEmitSenderHeartbeats, HEARTBEAT_SCAN_MS);
 }
 
 function attachVisibilityRefresh() {
@@ -47,6 +52,7 @@ function scheduleMutationWork() {
     mutationWorkTimer = null;
     scanForComposeDialogs();
     renderInboxBadges();
+    scanAndEmitSenderHeartbeats();
   }, MUTATION_DEBOUNCE_MS);
 }
 
@@ -456,6 +462,104 @@ function renderInboxBadges() {
   } finally {
     isRenderingBadges = false;
   }
+}
+
+function scanAndEmitSenderHeartbeats() {
+  if (!isRuntimeAvailable()) {
+    return;
+  }
+
+  const emailIds = extractVisibleTrackedEmailIds();
+  if (!emailIds.length) {
+    return;
+  }
+
+  const now = Date.now();
+  let sent = 0;
+  for (const emailId of emailIds) {
+    const lastSentAt = Number(lastHeartbeatByEmailId.get(emailId) || 0);
+    if (now - lastSentAt < HEARTBEAT_LOCAL_COOLDOWN_MS) {
+      continue;
+    }
+
+    lastHeartbeatByEmailId.set(emailId, now);
+    chrome.runtime.sendMessage({ type: "tracker:emitSenderHeartbeat", emailId }).catch(() => {
+      // no-op
+    });
+
+    sent += 1;
+    if (sent >= MAX_HEARTBEATS_PER_SCAN) {
+      break;
+    }
+  }
+}
+
+function extractVisibleTrackedEmailIds() {
+  const markerSelectors = [
+    '[data-email-tracker-marker][data-snv]',
+    '[id^="snvTrackDiv-"]',
+    '[data-snv]'
+  ];
+
+  const ids = new Set();
+  const markers = document.querySelectorAll(markerSelectors.join(","));
+  markers.forEach((marker) => {
+    if (!(marker instanceof HTMLElement)) {
+      return;
+    }
+
+    if (!isMarkerInVisibleMessage(marker)) {
+      return;
+    }
+
+    const candidate =
+      marker.dataset.snv ||
+      marker.getAttribute("data-snv") ||
+      marker.id.replace(/^snvTrackDiv-/i, "");
+
+    if (!candidate) {
+      return;
+    }
+
+    const normalized = String(candidate).trim().toLowerCase();
+    if (/^[0-9a-f-]{36}$/.test(normalized)) {
+      ids.add(normalized);
+    }
+  });
+
+  return Array.from(ids);
+}
+
+function isElementVisible(element) {
+  if (!(element instanceof HTMLElement)) {
+    return false;
+  }
+
+  const style = window.getComputedStyle(element);
+  if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
+    return false;
+  }
+
+  const rect = element.getBoundingClientRect();
+  if (!rect.width && !rect.height) {
+    return false;
+  }
+
+  return rect.bottom >= 0 && rect.right >= 0 && rect.top <= window.innerHeight && rect.left <= window.innerWidth;
+}
+
+function isMarkerInVisibleMessage(marker) {
+  if (!(marker instanceof HTMLElement)) {
+    return false;
+  }
+
+  const container =
+    marker.closest("div.adn") ||
+    marker.closest("div[role='listitem']") ||
+    marker.closest("div.if") ||
+    marker.parentElement;
+
+  return isElementVisible(container);
 }
 
 function findBadgeSlot(row) {

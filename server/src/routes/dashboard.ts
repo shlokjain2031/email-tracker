@@ -35,6 +35,8 @@ interface OpenEventRow {
   longitude: number | null;
   device_type: string;
   is_duplicate: number;
+  is_sender_suppressed: number;
+  suppression_reason: string | null;
 }
 
 const db = getDb();
@@ -57,8 +59,8 @@ const listEmailsStmt = db.prepare(`
     SELECT
       email_id,
       COUNT(*) AS raw_open_events,
-      SUM(CASE WHEN is_duplicate = 0 THEN 1 ELSE 0 END) AS total_open_events,
-      MAX(CASE WHEN is_duplicate = 0 THEN opened_at ELSE NULL END) AS last_opened_at
+      SUM(CASE WHEN is_duplicate = 0 AND IFNULL(is_sender_suppressed, 0) = 0 THEN 1 ELSE 0 END) AS total_open_events,
+      MAX(CASE WHEN is_duplicate = 0 AND IFNULL(is_sender_suppressed, 0) = 0 THEN opened_at ELSE NULL END) AS last_opened_at
     FROM open_events
     GROUP BY email_id
   ) oe ON oe.email_id = te.email_id
@@ -80,9 +82,12 @@ const listOpenEventsBaseSql = `
     latitude,
     longitude,
     device_type,
-    is_duplicate
+    is_duplicate,
+    is_sender_suppressed,
+    suppression_reason
   FROM open_events
   WHERE is_duplicate = 0
+    AND IFNULL(is_sender_suppressed, 0) = 0
 `;
 
 export const dashboardRouter = Router();

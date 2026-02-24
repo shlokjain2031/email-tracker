@@ -26,6 +26,12 @@ export function initDb(db = getDb()): void {
   db.exec(schemaSql);
 
   ensureColumnExists(db, "tracked_emails", "sender_email", "TEXT");
+  ensureColumnExists(db, "open_events", "is_sender_suppressed", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumnExists(db, "open_events", "suppression_reason", "TEXT");
+
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_open_events_visibility ON open_events(email_id, is_duplicate, is_sender_suppressed, opened_at DESC)"
+  );
 }
 
 function ensureColumnExists(db: Database.Database, table: string, column: string, definition: string): void {

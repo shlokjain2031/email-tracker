@@ -4,7 +4,7 @@ import { getDb, initDb } from "../db/sqlite.js";
 import { resolveGeoFromIp } from "./geoip.js";
 
 const DEDUP_WINDOW_MS = Number(process.env.DEDUP_WINDOW_MS || 30_000);
-const SELF_OPEN_GUARD_MS = Number(process.env.SELF_OPEN_GUARD_MS || 7_000);
+const SENDER_HEARTBEAT_WINDOW_MS = Number(process.env.SENDER_HEARTBEAT_WINDOW_MS || 120_000);
 
 export interface RecordOpenInput {
   payload: TrackingPayload;
@@ -15,7 +15,7 @@ export interface RecordOpenInput {
 
 export interface RecordOpenResult {
   isDuplicate: boolean;
-  isSuppressedLikelySender: boolean;
+  isSenderSuppressed: boolean;
   openCount: number;
 }
 
@@ -70,14 +70,14 @@ const findRecentDuplicateProxyStmt = db.prepare(`
   LIMIT 1
 `);
 
-const findLikelySenderFingerprintStmt = db.prepare(`
+const findRecentSenderHeartbeatStmt = db.prepare(`
   SELECT id
-  FROM open_events
+  FROM sender_heartbeats
   WHERE email_id = ?
     AND IFNULL(ip_address, '') = IFNULL(?, '')
     AND IFNULL(user_agent, '') = IFNULL(?, '')
-    AND opened_at <= ?
-  ORDER BY opened_at ASC
+    AND seen_at >= ?
+  ORDER BY seen_at DESC
   LIMIT 1
 `);
 
@@ -95,9 +95,11 @@ const insertOpenEventStmt = db.prepare(`
     latitude,
     longitude,
     device_type,
-    is_duplicate
+    is_duplicate,
+    is_sender_suppressed,
+    suppression_reason
   )
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'other', ?)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'other', ?, ?, ?)
 `);
 
 const incrementOpenCountStmt = db.prepare(`
@@ -140,30 +142,16 @@ const txn = db.transaction((input: RecordOpenInput): RecordOpenResult => {
     : undefined;
 
   const isDuplicate = Boolean(duplicateRow || duplicateByAgentRow || duplicateByProxyWindowRow);
-  const sentAtMs = Date.parse(input.payload.sent_at);
-  const openedAtMs = Date.parse(input.openedAtIso);
-  const isWithinInitialSenderWindow =
-    Number.isFinite(sentAtMs) &&
-    Number.isFinite(openedAtMs) &&
-    openedAtMs >= sentAtMs &&
-    openedAtMs - sentAtMs <= SELF_OPEN_GUARD_MS;
+  const heartbeatThreshold = new Date(Date.parse(input.openedAtIso) - SENDER_HEARTBEAT_WINDOW_MS).toISOString();
+  const senderHeartbeatMatch = findRecentSenderHeartbeatStmt.get(
+    input.payload.email_id,
+    input.ipAddress,
+    input.userAgent,
+    heartbeatThreshold
+  ) as { id: number } | undefined;
 
-  const senderWindowUpperBoundIso = Number.isFinite(sentAtMs)
-    ? new Date(sentAtMs + SELF_OPEN_GUARD_MS).toISOString()
-    : null;
-
-  const hasStrongFingerprint = Boolean(input.ipAddress && input.userAgent);
-  const priorLikelySenderFingerprint =
-    hasStrongFingerprint && senderWindowUpperBoundIso
-      ? (findLikelySenderFingerprintStmt.get(
-          input.payload.email_id,
-          input.ipAddress,
-          input.userAgent,
-          senderWindowUpperBoundIso
-        ) as { id: number } | undefined)
-      : undefined;
-
-  const isSuppressedLikelySender = isWithinInitialSenderWindow || Boolean(priorLikelySenderFingerprint);
+  const isSenderSuppressed = Boolean(senderHeartbeatMatch);
+  const suppressionReason = isDuplicate ? "duplicate" : isSenderSuppressed ? "sender_heartbeat" : null;
 
   const geo = resolveGeoFromIp(input.ipAddress);
 
@@ -179,10 +167,12 @@ const txn = db.transaction((input: RecordOpenInput): RecordOpenResult => {
     geo.geo_city,
     geo.latitude,
     geo.longitude,
-    isDuplicate || isSuppressedLikelySender ? 1 : 0
+    isDuplicate ? 1 : 0,
+    isSenderSuppressed ? 1 : 0,
+    suppressionReason
   );
 
-  if (!isDuplicate && !isSuppressedLikelySender) {
+  if (!isDuplicate && !isSenderSuppressed) {
     incrementOpenCountStmt.run(input.payload.email_id);
   }
 
@@ -190,7 +180,7 @@ const txn = db.transaction((input: RecordOpenInput): RecordOpenResult => {
 
   return {
     isDuplicate,
-    isSuppressedLikelySender,
+    isSenderSuppressed,
     openCount: row?.open_count ?? 0
   };
 });
@@ -280,40 +270,26 @@ function runWithDatabase(input: RecordOpenInput, database: Database.Database): R
       : undefined;
 
     const isDuplicate = Boolean(duplicateRow || duplicateByAgentRow || duplicateByProxyWindowRow);
-    const sentAtMs = Date.parse(txInput.payload.sent_at);
-    const openedAtMs = Date.parse(txInput.openedAtIso);
-    const isWithinInitialSenderWindow =
-      Number.isFinite(sentAtMs) &&
-      Number.isFinite(openedAtMs) &&
-      openedAtMs >= sentAtMs &&
-      openedAtMs - sentAtMs <= SELF_OPEN_GUARD_MS;
-
-    const senderWindowUpperBoundIso = Number.isFinite(sentAtMs)
-      ? new Date(sentAtMs + SELF_OPEN_GUARD_MS).toISOString()
-      : null;
-
-    const hasStrongFingerprint = Boolean(txInput.ipAddress && txInput.userAgent);
-    const priorLikelySenderFingerprint =
-      hasStrongFingerprint && senderWindowUpperBoundIso
-        ? (database
-            .prepare(
-              `
+    const heartbeatThreshold = new Date(Date.parse(txInput.openedAtIso) - SENDER_HEARTBEAT_WINDOW_MS).toISOString();
+    const senderHeartbeatMatch = database
+      .prepare(
+        `
       SELECT id
-      FROM open_events
+      FROM sender_heartbeats
       WHERE email_id = ?
         AND IFNULL(ip_address, '') = IFNULL(?, '')
         AND IFNULL(user_agent, '') = IFNULL(?, '')
-        AND opened_at <= ?
-      ORDER BY opened_at ASC
+        AND seen_at >= ?
+      ORDER BY seen_at DESC
       LIMIT 1
     `
-            )
-            .get(txInput.payload.email_id, txInput.ipAddress, txInput.userAgent, senderWindowUpperBoundIso) as
-            | { id: number }
-            | undefined)
-        : undefined;
+      )
+      .get(txInput.payload.email_id, txInput.ipAddress, txInput.userAgent, heartbeatThreshold) as
+      | { id: number }
+      | undefined;
 
-    const isSuppressedLikelySender = isWithinInitialSenderWindow || Boolean(priorLikelySenderFingerprint);
+    const isSenderSuppressed = Boolean(senderHeartbeatMatch);
+    const suppressionReason = isDuplicate ? "duplicate" : isSenderSuppressed ? "sender_heartbeat" : null;
     const geo = resolveGeoFromIp(txInput.ipAddress);
 
     database
@@ -332,9 +308,11 @@ function runWithDatabase(input: RecordOpenInput, database: Database.Database): R
         latitude,
         longitude,
         device_type,
-        is_duplicate
+        is_duplicate,
+        is_sender_suppressed,
+        suppression_reason
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'other', ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'other', ?, ?, ?)
     `
       )
       .run(
@@ -349,10 +327,12 @@ function runWithDatabase(input: RecordOpenInput, database: Database.Database): R
         geo.geo_city,
         geo.latitude,
         geo.longitude,
-        isDuplicate || isSuppressedLikelySender ? 1 : 0
+        isDuplicate ? 1 : 0,
+        isSenderSuppressed ? 1 : 0,
+        suppressionReason
       );
 
-    if (!isDuplicate && !isSuppressedLikelySender) {
+    if (!isDuplicate && !isSenderSuppressed) {
       database
         .prepare(
           `
@@ -376,7 +356,7 @@ function runWithDatabase(input: RecordOpenInput, database: Database.Database): R
 
     return {
       isDuplicate,
-      isSuppressedLikelySender,
+      isSenderSuppressed,
       openCount: row?.open_count ?? 0
     };
   });

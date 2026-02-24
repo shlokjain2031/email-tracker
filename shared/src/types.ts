@@ -31,4 +31,6 @@ export interface OpenEvent {
   longitude: number | null;
   device_type: "phone" | "computer" | "other";
   is_duplicate: number;
+  is_sender_suppressed: number;
+  suppression_reason: string | null;
 }

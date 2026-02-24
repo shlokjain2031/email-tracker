@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { decodeTrackingToken } from "@email-tracker/shared";
 import { recordOpenEvent } from "../services/openRecorder.js";
+import { recordSenderHeartbeat } from "../services/senderHeartbeat.js";
 
 const TRANSPARENT_PIXEL_GIF = Buffer.from("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==", "base64");
 
@@ -24,11 +25,40 @@ trackRouter.get("/t/:token.gif", (req, res) => {
 
     // eslint-disable-next-line no-console
     console.info(
-      `[pixel-hit] email_id=${payload.email_id} duplicate=${result.isDuplicate ? 1 : 0} suppressed_likely_sender=${result.isSuppressedLikelySender ? 1 : 0} counted=${!result.isDuplicate && !result.isSuppressedLikelySender ? 1 : 0} unique_open_count=${result.openCount} ip=${ipAddress || "-"}`
+      `[pixel-hit] email_id=${payload.email_id} duplicate=${result.isDuplicate ? 1 : 0} sender_suppressed=${result.isSenderSuppressed ? 1 : 0} counted=${!result.isDuplicate && !result.isSenderSuppressed ? 1 : 0} unique_open_count=${result.openCount} ip=${ipAddress || "-"}`
     );
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error("Tracking pixel processing failed:", error);
+  }
+
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  res.setHeader("Content-Type", "image/gif");
+  res.setHeader("Content-Length", TRANSPARENT_PIXEL_GIF.length.toString());
+
+  res.status(200).send(TRANSPARENT_PIXEL_GIF);
+});
+
+trackRouter.get("/h/:token.gif", (req, res) => {
+  const seenAtIso = new Date().toISOString();
+  const token = req.params.token;
+
+  try {
+    const payload = decodeTrackingToken(token);
+    const ipAddress = getRequestIp(req);
+    const userAgent = req.get("user-agent") || null;
+
+    recordSenderHeartbeat({
+      payload,
+      ipAddress,
+      userAgent,
+      seenAtIso
+    });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("Sender heartbeat processing failed:", error);
   }
 
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
