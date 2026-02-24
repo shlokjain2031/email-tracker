@@ -1,4 +1,4 @@
-# Email Tracker
+# Email Tracker Extension
 
 Self-hosted Gmail pixel tracking with:
 - Chrome extension (injects tracking pixel on send)
