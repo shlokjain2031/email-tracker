@@ -4,13 +4,14 @@ import { getDb, initDb } from "../db/sqlite.js";
 import { resolveGeoFromIp } from "./geoip.js";
 
 const DEDUP_WINDOW_MS = Number(process.env.DEDUP_WINDOW_MS || 30_000);
-const SENDER_HEARTBEAT_WINDOW_MS = Number(process.env.SENDER_HEARTBEAT_WINDOW_MS || 2_000);
 
 export interface RecordOpenInput {
   payload: TrackingPayload;
   ipAddress: string | null;
   userAgent: string | null;
   openedAtIso: string;
+  forceSenderSuppressed?: boolean;
+  suppressionReason?: string | null;
 }
 
 export interface RecordOpenResult {
@@ -67,15 +68,6 @@ const findRecentDuplicateProxyStmt = db.prepare(`
       OR LOWER(IFNULL(user_agent, '')) LIKE '%ggpht.com%'
     )
   ORDER BY opened_at DESC
-  LIMIT 1
-`);
-
-const findRecentSenderHeartbeatStmt = db.prepare(`
-  SELECT id
-  FROM sender_heartbeats
-  WHERE email_id = ?
-    AND seen_at >= ?
-  ORDER BY seen_at DESC
   LIMIT 1
 `);
 
@@ -140,13 +132,12 @@ const txn = db.transaction((input: RecordOpenInput): RecordOpenResult => {
     : undefined;
 
   const isDuplicate = Boolean(duplicateRow || duplicateByAgentRow || duplicateByProxyWindowRow);
-  const heartbeatThreshold = new Date(Date.parse(input.openedAtIso) - SENDER_HEARTBEAT_WINDOW_MS).toISOString();
-  const senderHeartbeatMatch = findRecentSenderHeartbeatStmt.get(input.payload.email_id, heartbeatThreshold) as
-    | { id: number }
-    | undefined;
-
-  const isSenderSuppressed = Boolean(senderHeartbeatMatch);
-  const suppressionReason = isDuplicate ? "duplicate" : isSenderSuppressed ? "sender_heartbeat" : null;
+  const isSenderSuppressed = Boolean(input.forceSenderSuppressed);
+  const suppressionReason = isDuplicate
+    ? "duplicate"
+    : isSenderSuppressed
+      ? String(input.suppressionReason || "mark_suppress_next")
+      : null;
 
   const geo = resolveGeoFromIp(input.ipAddress);
 
@@ -265,22 +256,12 @@ function runWithDatabase(input: RecordOpenInput, database: Database.Database): R
       : undefined;
 
     const isDuplicate = Boolean(duplicateRow || duplicateByAgentRow || duplicateByProxyWindowRow);
-    const heartbeatThreshold = new Date(Date.parse(txInput.openedAtIso) - SENDER_HEARTBEAT_WINDOW_MS).toISOString();
-    const senderHeartbeatMatch = database
-      .prepare(
-        `
-      SELECT id
-      FROM sender_heartbeats
-      WHERE email_id = ?
-        AND seen_at >= ?
-      ORDER BY seen_at DESC
-      LIMIT 1
-    `
-      )
-      .get(txInput.payload.email_id, heartbeatThreshold) as { id: number } | undefined;
-
-    const isSenderSuppressed = Boolean(senderHeartbeatMatch);
-    const suppressionReason = isDuplicate ? "duplicate" : isSenderSuppressed ? "sender_heartbeat" : null;
+    const isSenderSuppressed = Boolean(txInput.forceSenderSuppressed);
+    const suppressionReason = isDuplicate
+      ? "duplicate"
+      : isSenderSuppressed
+        ? String(txInput.suppressionReason || "mark_suppress_next")
+        : null;
     const geo = resolveGeoFromIp(txInput.ipAddress);
 
     database

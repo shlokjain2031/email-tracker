@@ -7,8 +7,6 @@ const STORAGE_KEYS = {
 
 const DEFAULT_TRACKER_BASE_URL = "https://email-tracker.duckdns.org";
 const RECENT_LIMIT = 100;
-const HEARTBEAT_COOLDOWN_MS = 15_000;
-const lastHeartbeatByEmailId = new Map();
 
 chrome.runtime.onInstalled.addListener(async () => {
   await chrome.storage.local.set({
@@ -85,13 +83,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         debugItems,
         debugGeneratedAt: new Date().toISOString()
       });
-      return;
-    }
-
-    if (message?.type === "tracker:emitSenderHeartbeat") {
-      const emailId = String(message.emailId || "").trim();
-      const result = await emitSenderHeartbeatForEmail(emailId);
-      sendResponse({ ok: true, ...result });
       return;
     }
 
@@ -330,37 +321,6 @@ function safeHostFromUrl(url) {
   }
 }
 
-async function emitSenderHeartbeatForEmail(emailId) {
-  if (!emailId) {
-    return { sent: false, reason: "missing email id" };
-  }
-
-  const now = Date.now();
-  const lastSentAt = Number(lastHeartbeatByEmailId.get(emailId) || 0);
-  if (now - lastSentAt < HEARTBEAT_COOLDOWN_MS) {
-    return { sent: false, reason: "cooldown" };
-  }
-
-  const { [STORAGE_KEYS.RECENT_EMAILS]: recentEmails = [] } = await chrome.storage.local.get(STORAGE_KEYS.RECENT_EMAILS);
-  const tracked = Array.isArray(recentEmails)
-    ? recentEmails.find((item) => String(item?.emailId || "").trim().toLowerCase() === emailId.toLowerCase())
-    : null;
-
-  const pixelUrl = String(tracked?.pixelUrl || "").trim();
-  const heartbeatUrl = toHeartbeatUrl(pixelUrl);
-  if (!heartbeatUrl) {
-    return { sent: false, reason: "missing heartbeat url" };
-  }
-
-  try {
-    await fetch(heartbeatUrl, { method: "GET", cache: "no-store", credentials: "omit", mode: "no-cors" });
-    lastHeartbeatByEmailId.set(emailId, now);
-    return { sent: true, reason: "ok" };
-  } catch (error) {
-    return { sent: false, reason: String(error?.message || error) };
-  }
-}
-
 async function markSuppressNextForEmail(emailId) {
   if (!emailId) {
     return { sent: false, reason: "missing email id" };
@@ -386,22 +346,6 @@ async function markSuppressNextForEmail(emailId) {
     return { sent: true, reason: "ok" };
   } catch (error) {
     return { sent: false, reason: String(error?.message || error) };
-  }
-}
-
-function toHeartbeatUrl(pixelUrl) {
-  try {
-    const url = new URL(pixelUrl);
-    const tokenMatch = url.pathname.match(/^\/t\/([^/.]+)\.gif$/i);
-    if (!tokenMatch?.[1]) {
-      return "";
-    }
-
-    url.pathname = `/h/${tokenMatch[1]}.gif`;
-    url.search = "";
-    return url.toString();
-  } catch {
-    return "";
   }
 }
 
