@@ -530,7 +530,7 @@ function scanAndMarkSuppressNext() {
     return;
   }
 
-  const images = document.querySelectorAll('img[src*="/t/"]');
+  const images = document.querySelectorAll("img[src]");
   images.forEach((imgNode) => {
     if (!(imgNode instanceof HTMLImageElement)) {
       return;
@@ -561,8 +561,7 @@ function scanAndMarkSuppressNext() {
     chrome.runtime
       .sendMessage({
         type: "tracker:markSuppressNext",
-        emailId: payload.emailId,
-        baseUrl: extractBaseUrlFromTrackingSrc(src)
+        emailId: payload.emailId
       })
       .catch(() => {
         // no-op
@@ -625,8 +624,51 @@ function detectCurrentLoggedInEmail() {
 
 function extractTokenFromTrackingSrc(src) {
   const value = String(src || "");
-  const tokenHit = value.match(/\/t\/([^/?#.]+)\.gif/i);
-  return tokenHit?.[1] ? tokenHit[1] : "";
+  const direct = extractTokenFromText(value);
+  if (direct) {
+    return direct;
+  }
+
+  try {
+    const url = new URL(value, window.location.origin);
+    const possibleParams = ["url", "u", "q", "imgurl"];
+    for (const key of possibleParams) {
+      const param = url.searchParams.get(key);
+      if (!param) {
+        continue;
+      }
+
+      const decoded = safeDecodeURIComponent(param);
+      const hit = extractTokenFromText(decoded) || extractTokenFromText(param);
+      if (hit) {
+        return hit;
+      }
+    }
+
+    const decodedHref = safeDecodeURIComponent(url.href);
+    const decodedHit = extractTokenFromText(decodedHref);
+    if (decodedHit) {
+      return decodedHit;
+    }
+  } catch {
+    // no-op
+  }
+
+  return "";
+}
+
+function extractTokenFromText(input) {
+  const text = String(input || "");
+  const hit = text.match(/\/t\/([^/?#.]+)\.gif/i);
+  return hit?.[1] ? hit[1] : "";
+}
+
+function safeDecodeURIComponent(value) {
+  try {
+    return decodeURIComponent(String(value || ""));
+  } catch {
+    return String(value || "");
+  }
 }
 
 function decodeTrackingPayloadFromToken(token) {
@@ -660,28 +702,6 @@ function decodeTrackingPayloadFromToken(token) {
     // Token parse failures are expected on non-tracker images; fail silently.
     return null;
   }
-}
-
-function extractBaseUrlFromTrackingSrc(src) {
-  const value = String(src || "");
-
-  try {
-    const direct = new URL(value, window.location.origin);
-    if (direct.pathname.includes("/t/")) {
-      return `${direct.protocol}//${direct.host}`;
-    }
-
-    const pathCandidate = `${direct.pathname}${direct.search}${direct.hash}`;
-    const embeddedHit = pathCandidate.match(/https?:\/\/[^\s"'#]+\/t\/[^/?#.]+\.gif/i);
-    if (embeddedHit?.[0]) {
-      const embedded = new URL(embeddedHit[0]);
-      return `${embedded.protocol}//${embedded.host}`;
-    }
-  } catch {
-    // no-op
-  }
-
-  return "https://email-tracker.duckdns.org";
 }
 
 function isElementVisible(element) {

@@ -13,11 +13,13 @@ const GOOGLE_PROXY_IP_PREFIXES = ["66.249.", "64.233.", "74.125."];
 // Server-side timestamps are the source of truth to avoid client clock skew.
 const senderViewingMap = new Map<string, number>();
 const latencySamples: number[] = [];
+const suppressSignalEvents: Array<{ endpoint: string; email_id: string; at_ms: number; ip: string; user_agent: string }> = [];
+let suppressSignalCount = 0;
 
 export const trackRouter = Router();
 
 trackRouter.post("/sender-viewing", (req, res) => {
-  const signal = recordSenderSignalTimestamp(req.body?.email_id);
+  const signal = recordSenderSignalTimestamp(req.body?.email_id, "/sender-viewing", req);
   if (!signal.ok) {
     res.status(400).json({ ok: false, error: "email_id is required" });
     return;
@@ -27,7 +29,7 @@ trackRouter.post("/sender-viewing", (req, res) => {
 });
 
 trackRouter.post("/mark-suppress-next", (req, res) => {
-  const signal = recordSenderSignalTimestamp(req.body?.email_id);
+  const signal = recordSenderSignalTimestamp(req.body?.email_id, "/mark-suppress-next", req);
   if (!signal.ok) {
     res.status(400).json({ ok: false, error: "email_id is required" });
     return;
@@ -36,7 +38,11 @@ trackRouter.post("/mark-suppress-next", (req, res) => {
   res.json({ ok: true, email_id: signal.emailId, recorded_at_ms: signal.recordedAtMs });
 });
 
-function recordSenderSignalTimestamp(rawEmailId: unknown):
+function recordSenderSignalTimestamp(
+  rawEmailId: unknown,
+  endpoint: string,
+  req: { ip?: string; headers: Record<string, unknown>; socket?: { remoteAddress?: string }; get?: (headerName: string) => string | undefined } | null
+):
   | { ok: true; emailId: string; recordedAtMs: number }
   | { ok: false } {
   const emailId = String(rawEmailId || "").trim();
@@ -47,6 +53,29 @@ function recordSenderSignalTimestamp(rawEmailId: unknown):
   const nowMs = Date.now();
   senderViewingMap.set(emailId, nowMs);
   enforceSenderViewingMapLimit();
+
+  suppressSignalCount += 1;
+  suppressSignalEvents.push({
+    endpoint,
+    email_id: emailId,
+    at_ms: nowMs,
+    ip: normalizeIp(req ? getRequestIp(req) : null),
+    user_agent: String(req?.get?.("user-agent") || "")
+  });
+  if (suppressSignalEvents.length > 50) {
+    suppressSignalEvents.splice(0, suppressSignalEvents.length - 50);
+  }
+
+  // eslint-disable-next-line no-console
+  console.info(
+    JSON.stringify({
+      event: "suppress_signal_received",
+      endpoint,
+      email_id: emailId,
+      at_ms: nowMs,
+      map_size: senderViewingMap.size
+    })
+  );
 
   return { ok: true, emailId, recordedAtMs: nowMs };
 }
@@ -91,6 +120,14 @@ trackRouter.get("/t/:token.gif", (req, res) => {
 trackRouter.get("/metrics/gmail-proxy-latency", (_req, res) => {
   const stats = buildLatencyStats(latencySamples);
   res.json(stats);
+});
+
+trackRouter.get("/metrics/suppress-signals", (_req, res) => {
+  res.json({
+    count: suppressSignalCount,
+    active_email_ids: senderViewingMap.size,
+    recent: suppressSignalEvents
+  });
 });
 
 trackRouter.get("/h/:token.gif", (req, res) => {

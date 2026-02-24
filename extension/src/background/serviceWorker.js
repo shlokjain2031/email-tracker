@@ -6,21 +6,14 @@ const STORAGE_KEYS = {
 };
 
 const DEFAULT_TRACKER_BASE_URL = "https://email-tracker.duckdns.org";
-const LEGACY_TRACKER_BASE_URLS = new Set(["http://localhost:8080", "http://localhost:8090"]);
 const RECENT_LIMIT = 100;
 const HEARTBEAT_COOLDOWN_MS = 15_000;
 const lastHeartbeatByEmailId = new Map();
 
 chrome.runtime.onInstalled.addListener(async () => {
-  const { [STORAGE_KEYS.TRACKER_BASE_URL]: trackerBaseUrl } = await chrome.storage.local.get(
-    STORAGE_KEYS.TRACKER_BASE_URL
-  );
-
-  if (!trackerBaseUrl || LEGACY_TRACKER_BASE_URLS.has(String(trackerBaseUrl).trim())) {
-    await chrome.storage.local.set({
-      [STORAGE_KEYS.TRACKER_BASE_URL]: DEFAULT_TRACKER_BASE_URL
-    });
-  }
+  await chrome.storage.local.set({
+    [STORAGE_KEYS.TRACKER_BASE_URL]: DEFAULT_TRACKER_BASE_URL
+  });
 
   await ensureUserId();
 });
@@ -33,7 +26,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const sentAt = new Date().toISOString();
       const recipient = (message.recipient || "unknown").trim();
       const senderEmail = String(message.senderEmail || "").trim().toLowerCase() || null;
-      const baseUrl = DEFAULT_TRACKER_BASE_URL;
+      const baseUrl = await getTrackerBaseUrl();
       const token = encodeTrackingToken({
         user_id: userId,
         email_id: emailId,
@@ -54,6 +47,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
 
     if (message?.type === "tracker:getInboxBadgeData") {
+      const trackerBaseUrl = await getTrackerBaseUrl();
       const {
         [STORAGE_KEYS.RECENT_EMAILS]: recentEmails = [],
         [STORAGE_KEYS.DASHBOARD_TOKEN]: dashboardToken = ""
@@ -62,13 +56,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         STORAGE_KEYS.DASHBOARD_TOKEN
       ]);
 
-      const enriched = await enrichRecentEmails(recentEmails, DEFAULT_TRACKER_BASE_URL, dashboardToken);
-      sendResponse({ ok: true, trackerBaseUrl: DEFAULT_TRACKER_BASE_URL, items: enriched });
+      const enriched = await enrichRecentEmails(recentEmails, trackerBaseUrl, dashboardToken);
+      sendResponse({ ok: true, trackerBaseUrl, items: enriched });
       return;
     }
 
     if (message?.type === "tracker:getPopupData") {
       const userId = await ensureUserId();
+      const trackerBaseUrl = await getTrackerBaseUrl();
       const {
         [STORAGE_KEYS.RECENT_EMAILS]: recentEmails = [],
         [STORAGE_KEYS.DASHBOARD_TOKEN]: dashboardToken = ""
@@ -77,13 +72,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         STORAGE_KEYS.DASHBOARD_TOKEN
       ]);
 
-      const enrichedRecentEmails = await enrichRecentEmails(recentEmails, DEFAULT_TRACKER_BASE_URL, dashboardToken);
-      const debugItems = await getPopupDebugItems(enrichedRecentEmails, DEFAULT_TRACKER_BASE_URL, dashboardToken);
+      const enrichedRecentEmails = await enrichRecentEmails(recentEmails, trackerBaseUrl, dashboardToken);
+      const debugItems = await getPopupDebugItems(enrichedRecentEmails, trackerBaseUrl, dashboardToken);
 
       sendResponse({
         ok: true,
         userId,
-        trackerBaseUrl: DEFAULT_TRACKER_BASE_URL,
+        trackerBaseUrl,
         dashboardToken,
         recentEmails,
         enrichedRecentEmails,
@@ -102,8 +97,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
     if (message?.type === "tracker:markSuppressNext") {
       const emailId = String(message.emailId || "").trim();
-      const baseUrl = String(message.baseUrl || "").trim();
-      const result = await markSuppressNextForEmail(emailId, baseUrl);
+      const result = await markSuppressNextForEmail(emailId);
       sendResponse({ ok: true, ...result });
       return;
     }
@@ -173,6 +167,17 @@ function normalizeBaseUrl(url) {
   }
 
   return normalized.replace(/\/+$/, "");
+}
+
+async function getTrackerBaseUrl() {
+  const { [STORAGE_KEYS.TRACKER_BASE_URL]: trackerBaseUrl } = await chrome.storage.local.get(STORAGE_KEYS.TRACKER_BASE_URL);
+  const normalized = normalizeBaseUrl(trackerBaseUrl || "");
+
+  if (normalized !== DEFAULT_TRACKER_BASE_URL) {
+    await chrome.storage.local.set({ [STORAGE_KEYS.TRACKER_BASE_URL]: DEFAULT_TRACKER_BASE_URL });
+  }
+
+  return DEFAULT_TRACKER_BASE_URL;
 }
 
 async function enrichRecentEmails(recentEmails, trackerBaseUrl, dashboardToken) {
@@ -356,12 +361,12 @@ async function emitSenderHeartbeatForEmail(emailId) {
   }
 }
 
-async function markSuppressNextForEmail(emailId, baseUrl) {
+async function markSuppressNextForEmail(emailId) {
   if (!emailId) {
     return { sent: false, reason: "missing email id" };
   }
 
-  const normalizedBaseUrl = normalizeBaseUrl(baseUrl || DEFAULT_TRACKER_BASE_URL);
+  const normalizedBaseUrl = await getTrackerBaseUrl();
 
   try {
     const response = await fetch(`${normalizedBaseUrl}/mark-suppress-next`, {
