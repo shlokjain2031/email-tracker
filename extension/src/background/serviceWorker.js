@@ -94,8 +94,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
 
     if (message?.type === "tracker:updateTrackerBaseUrl") {
-      await chrome.storage.local.set({ [STORAGE_KEYS.TRACKER_BASE_URL]: DEFAULT_TRACKER_BASE_URL });
-      sendResponse({ ok: true, trackerBaseUrl: DEFAULT_TRACKER_BASE_URL });
+      const trackerBaseUrl = normalizeBaseUrl(message.baseUrl || "");
+      await chrome.storage.local.set({ [STORAGE_KEYS.TRACKER_BASE_URL]: trackerBaseUrl });
+      sendResponse({ ok: true, trackerBaseUrl });
       return;
     }
 
@@ -162,13 +163,12 @@ function normalizeBaseUrl(url) {
 
 async function getTrackerBaseUrl() {
   const { [STORAGE_KEYS.TRACKER_BASE_URL]: trackerBaseUrl } = await chrome.storage.local.get(STORAGE_KEYS.TRACKER_BASE_URL);
-  const normalized = normalizeBaseUrl(trackerBaseUrl || "");
-
-  if (normalized !== DEFAULT_TRACKER_BASE_URL) {
-    await chrome.storage.local.set({ [STORAGE_KEYS.TRACKER_BASE_URL]: DEFAULT_TRACKER_BASE_URL });
+  const normalized = normalizeBaseUrl(trackerBaseUrl || DEFAULT_TRACKER_BASE_URL);
+  if (!trackerBaseUrl) {
+    await chrome.storage.local.set({ [STORAGE_KEYS.TRACKER_BASE_URL]: normalized });
   }
 
-  return DEFAULT_TRACKER_BASE_URL;
+  return normalized;
 }
 
 async function enrichRecentEmails(recentEmails, trackerBaseUrl, dashboardToken) {

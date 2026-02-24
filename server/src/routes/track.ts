@@ -46,20 +46,6 @@ trackRouter.post("/mark-suppress-next", (req, res) => {
   res.json({ ok: true, email_id: signal.emailId, recorded_at_ms: signal.recordedAtMs });
 });
 
-// Backward-compatible alias for older clients.
-trackRouter.post("/sender-viewing", (req, res) => {
-  const nowMs = Date.now();
-  cleanupExpiredSuppressions(nowMs);
-
-  const signal = markSuppressNext(req.body?.email_id, req, nowMs);
-  if (!signal.ok) {
-    res.status(400).json({ ok: false, error: "email_id is required" });
-    return;
-  }
-
-  res.json({ ok: true, email_id: signal.emailId, recorded_at_ms: signal.recordedAtMs });
-});
-
 function markSuppressNext(
   rawEmailId: unknown,
   req: {
