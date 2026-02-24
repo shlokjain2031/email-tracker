@@ -365,7 +365,19 @@ function toHeartbeatUrl(pixelUrl) {
 }
 
 function encodeTrackingToken(payload) {
-  const json = JSON.stringify(payload);
+  const compactPayload = [
+    payload.user_id,
+    payload.email_id,
+    payload.recipient,
+    payload.sent_at,
+    payload.sender_email
+  ];
+
+  if (!compactPayload[4]) {
+    compactPayload.length = 4;
+  }
+
+  const json = JSON.stringify(compactPayload);
   const bytes = new TextEncoder().encode(json);
   const chunkSize = 0x8000;
   let binary = "";

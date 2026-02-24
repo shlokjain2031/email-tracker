@@ -4,7 +4,7 @@ import { getDb, initDb } from "../db/sqlite.js";
 import { resolveGeoFromIp } from "./geoip.js";
 
 const DEDUP_WINDOW_MS = Number(process.env.DEDUP_WINDOW_MS || 30_000);
-const SENDER_HEARTBEAT_WINDOW_MS = Number(process.env.SENDER_HEARTBEAT_WINDOW_MS || 120_000);
+const SENDER_HEARTBEAT_WINDOW_MS = Number(process.env.SENDER_HEARTBEAT_WINDOW_MS || 600_000);
 
 export interface RecordOpenInput {
   payload: TrackingPayload;
@@ -74,8 +74,6 @@ const findRecentSenderHeartbeatStmt = db.prepare(`
   SELECT id
   FROM sender_heartbeats
   WHERE email_id = ?
-    AND IFNULL(ip_address, '') = IFNULL(?, '')
-    AND IFNULL(user_agent, '') = IFNULL(?, '')
     AND seen_at >= ?
   ORDER BY seen_at DESC
   LIMIT 1
@@ -143,12 +141,9 @@ const txn = db.transaction((input: RecordOpenInput): RecordOpenResult => {
 
   const isDuplicate = Boolean(duplicateRow || duplicateByAgentRow || duplicateByProxyWindowRow);
   const heartbeatThreshold = new Date(Date.parse(input.openedAtIso) - SENDER_HEARTBEAT_WINDOW_MS).toISOString();
-  const senderHeartbeatMatch = findRecentSenderHeartbeatStmt.get(
-    input.payload.email_id,
-    input.ipAddress,
-    input.userAgent,
-    heartbeatThreshold
-  ) as { id: number } | undefined;
+  const senderHeartbeatMatch = findRecentSenderHeartbeatStmt.get(input.payload.email_id, heartbeatThreshold) as
+    | { id: number }
+    | undefined;
 
   const isSenderSuppressed = Boolean(senderHeartbeatMatch);
   const suppressionReason = isDuplicate ? "duplicate" : isSenderSuppressed ? "sender_heartbeat" : null;
@@ -277,16 +272,12 @@ function runWithDatabase(input: RecordOpenInput, database: Database.Database): R
       SELECT id
       FROM sender_heartbeats
       WHERE email_id = ?
-        AND IFNULL(ip_address, '') = IFNULL(?, '')
-        AND IFNULL(user_agent, '') = IFNULL(?, '')
         AND seen_at >= ?
       ORDER BY seen_at DESC
       LIMIT 1
     `
       )
-      .get(txInput.payload.email_id, txInput.ipAddress, txInput.userAgent, heartbeatThreshold) as
-      | { id: number }
-      | undefined;
+      .get(txInput.payload.email_id, heartbeatThreshold) as { id: number } | undefined;
 
     const isSenderSuppressed = Boolean(senderHeartbeatMatch);
     const suppressionReason = isDuplicate ? "duplicate" : isSenderSuppressed ? "sender_heartbeat" : null;
