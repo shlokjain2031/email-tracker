@@ -470,7 +470,7 @@ function renderInboxBadges() {
 
       let isDisabled = false;
       let clickHandler = () => {
-        window.location.assign("https://email-tracker.duckdns.org/dashboard");
+        window.open("https://email-tracker.duckdns.org/dashboard", "_blank", "noopener,noreferrer");
       };
       let title = "Open dashboard";
 
@@ -481,7 +481,7 @@ function renderInboxBadges() {
           const dashboardUrl = `${matched.baseUrl || "https://email-tracker.duckdns.org"}/dashboard?tab=opens&email_id=${encodeURIComponent(
             matched.emailId
           )}`;
-          window.location.assign(dashboardUrl);
+          window.open(dashboardUrl, "_blank", "noopener,noreferrer");
         };
       }
 
