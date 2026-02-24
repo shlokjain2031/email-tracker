@@ -100,6 +100,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return;
     }
 
+    if (message?.type === "tracker:markSuppressNext") {
+      const emailId = String(message.emailId || "").trim();
+      const baseUrl = String(message.baseUrl || "").trim();
+      const result = await markSuppressNextForEmail(emailId, baseUrl);
+      sendResponse({ ok: true, ...result });
+      return;
+    }
+
     if (message?.type === "tracker:updateTrackerBaseUrl") {
       await chrome.storage.local.set({ [STORAGE_KEYS.TRACKER_BASE_URL]: DEFAULT_TRACKER_BASE_URL });
       sendResponse({ ok: true, trackerBaseUrl: DEFAULT_TRACKER_BASE_URL });
@@ -342,6 +350,34 @@ async function emitSenderHeartbeatForEmail(emailId) {
   try {
     await fetch(heartbeatUrl, { method: "GET", cache: "no-store", credentials: "omit", mode: "no-cors" });
     lastHeartbeatByEmailId.set(emailId, now);
+    return { sent: true, reason: "ok" };
+  } catch (error) {
+    return { sent: false, reason: String(error?.message || error) };
+  }
+}
+
+async function markSuppressNextForEmail(emailId, baseUrl) {
+  if (!emailId) {
+    return { sent: false, reason: "missing email id" };
+  }
+
+  const normalizedBaseUrl = normalizeBaseUrl(baseUrl || DEFAULT_TRACKER_BASE_URL);
+
+  try {
+    const response = await fetch(`${normalizedBaseUrl}/mark-suppress-next`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ email_id: emailId }),
+      cache: "no-store",
+      credentials: "omit"
+    });
+
+    if (!response.ok) {
+      return { sent: false, reason: `http ${response.status}` };
+    }
+
     return { sent: true, reason: "ok" };
   } catch (error) {
     return { sent: false, reason: String(error?.message || error) };

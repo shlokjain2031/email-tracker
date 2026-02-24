@@ -7,6 +7,7 @@ const app = express();
 const port = Number(process.env.PORT ?? 8080);
 
 app.set("trust proxy", true);
+app.use(express.json({ limit: "16kb" }));
 initDb();
 
 app.get("/health", (_req, res) => {

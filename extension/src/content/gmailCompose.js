@@ -1,27 +1,29 @@
 const TRACKER_PIXEL_MARKER = "data-email-tracker-pixel";
 const BADGE_REFRESH_MS = 10_000;
-const MUTATION_DEBOUNCE_MS = 250;
+const MUTATION_DEBOUNCE_MS = 200;
 const MAX_ROWS_TO_RENDER = 120;
-const HEARTBEAT_SCAN_MS = 5_000;
-const HEARTBEAT_LOCAL_COOLDOWN_MS = 5_000;
-const MAX_HEARTBEATS_PER_SCAN = 10;
+const ACCOUNT_EMAIL_SCAN_MS = 15_000;
 
 let inboxBadgeItems = [];
 let lastInboxRefreshAt = 0;
 let mutationWorkTimer = null;
 let isRenderingBadges = false;
-const lastHeartbeatByEmailId = new Map();
+let currentThreadUrl = window.location.href;
+let cachedLoggedInEmail = "";
+const processedSuppressEmailIds = new Set();
 
 init();
 
 function init() {
   injectBadgeStyles();
   attachPageObserver();
+  attachThreadNavigationReset();
   attachVisibilityRefresh();
   scanForComposeDialogs();
   refreshInboxBadgeData();
+  scanAndMarkSuppressNext();
   setInterval(refreshInboxBadgeData, BADGE_REFRESH_MS);
-  setInterval(scanAndEmitSenderHeartbeats, HEARTBEAT_SCAN_MS);
+  setInterval(refreshLoggedInEmailCache, ACCOUNT_EMAIL_SCAN_MS);
 }
 
 function attachVisibilityRefresh() {
@@ -33,27 +35,75 @@ function attachVisibilityRefresh() {
 }
 
 function attachPageObserver() {
+  // Gmail is a SPA and re-renders conversation/message DOM fragments frequently.
+  // We observe body-level mutations so suppression checks rerun whenever thread content changes.
+  if (!(document.body instanceof HTMLElement)) {
+    window.requestAnimationFrame(attachPageObserver);
+    return;
+  }
+
   const observer = new MutationObserver(() => {
     scheduleMutationWork();
   });
 
-  observer.observe(document.documentElement, {
+  observer.observe(document.body, {
     childList: true,
     subtree: true
   });
 }
 
 function scheduleMutationWork() {
+  // Debouncing avoids expensive rescans during bursty Gmail mutations.
   if (mutationWorkTimer) {
     clearTimeout(mutationWorkTimer);
   }
 
   mutationWorkTimer = setTimeout(() => {
     mutationWorkTimer = null;
+    maybeResetSuppressionStateOnNavigation();
     scanForComposeDialogs();
     renderInboxBadges();
-    scanAndEmitSenderHeartbeats();
+    scanAndMarkSuppressNext();
   }, MUTATION_DEBOUNCE_MS);
+}
+
+function attachThreadNavigationReset() {
+  const wrapHistoryMethod = (methodName) => {
+    const original = history[methodName];
+    if (typeof original !== "function") {
+      return;
+    }
+
+    history[methodName] = function wrappedHistoryMethod(...args) {
+      const result = original.apply(this, args);
+      maybeResetSuppressionStateOnNavigation();
+      scheduleMutationWork();
+      return result;
+    };
+  };
+
+  wrapHistoryMethod("pushState");
+  wrapHistoryMethod("replaceState");
+
+  window.addEventListener("popstate", () => {
+    maybeResetSuppressionStateOnNavigation();
+    scheduleMutationWork();
+  });
+
+  window.addEventListener("hashchange", () => {
+    maybeResetSuppressionStateOnNavigation();
+    scheduleMutationWork();
+  });
+}
+
+function maybeResetSuppressionStateOnNavigation() {
+  const href = window.location.href;
+  if (href === currentThreadUrl) {
+    return;
+  }
+
+  currentThreadUrl = href;
+  processedSuppressEmailIds.clear();
 }
 
 function injectBadgeStyles() {
@@ -235,11 +285,13 @@ async function injectTrackingPixelIfNeeded(dialog) {
   img.alt = "";
   img.style.cssText = "width:1px;height:1px;opacity:0;display:block;border:0;";
 
+  const compactEmailId = encodeUuidCompact(response.emailId) || response.emailId;
+
   const marker = document.createElement("div");
-  marker.id = `snvTrackDiv-${response.emailId}`;
+  marker.id = `s${compactEmailId}`;
   marker.setAttribute("data-email-tracker-marker", "1");
-  marker.dataset.snv = response.emailId;
-  marker.style.cssText = "display:block;width:0;height:0;max-height:0;overflow:hidden;opacity:0;font-size:0;line-height:0;";
+  marker.setAttribute("data-et", compactEmailId);
+  marker.hidden = true;
   marker.textContent = "\u200C";
 
   body.appendChild(marker);
@@ -464,70 +516,172 @@ function renderInboxBadges() {
   }
 }
 
-function scanAndEmitSenderHeartbeats() {
+function scanAndMarkSuppressNext() {
   if (!isRuntimeAvailable()) {
     return;
   }
 
-  const emailIds = extractVisibleTrackedEmailIds();
-  if (!emailIds.length) {
+  if (!isConversationViewRendered()) {
     return;
   }
 
-  const now = Date.now();
-  let sent = 0;
-  for (const emailId of emailIds) {
-    const lastSentAt = Number(lastHeartbeatByEmailId.get(emailId) || 0);
-    if (now - lastSentAt < HEARTBEAT_LOCAL_COOLDOWN_MS) {
-      continue;
+  const currentEmail = getCurrentLoggedInEmail();
+  if (!isLikelyEmail(currentEmail)) {
+    return;
+  }
+
+  const images = document.querySelectorAll('img[src*="/t/"]');
+  images.forEach((imgNode) => {
+    if (!(imgNode instanceof HTMLImageElement)) {
+      return;
     }
 
-    lastHeartbeatByEmailId.set(emailId, now);
-    chrome.runtime.sendMessage({ type: "tracker:emitSenderHeartbeat", emailId }).catch(() => {
-      // no-op
-    });
-
-    sent += 1;
-    if (sent >= MAX_HEARTBEATS_PER_SCAN) {
-      break;
+    const src = imgNode.getAttribute("src") || imgNode.src || "";
+    const token = extractTokenFromTrackingSrc(src);
+    if (!token) {
+      return;
     }
+
+    const payload = decodeTrackingPayloadFromToken(token);
+    if (!payload?.emailId || !payload?.senderEmail) {
+      return;
+    }
+
+    if (processedSuppressEmailIds.has(payload.emailId)) {
+      return;
+    }
+
+    // Identity-based suppression: sender viewing own tracked message should suppress next open.
+    // Folder names are unreliable in Gmail SPA; account identity is stable for this decision.
+    if (normalizeEmailCandidate(payload.senderEmail) !== normalizeEmailCandidate(currentEmail)) {
+      return;
+    }
+
+    processedSuppressEmailIds.add(payload.emailId);
+    chrome.runtime
+      .sendMessage({
+        type: "tracker:markSuppressNext",
+        emailId: payload.emailId,
+        baseUrl: extractBaseUrlFromTrackingSrc(src)
+      })
+      .catch(() => {
+        // no-op
+      });
+  });
+}
+
+function isConversationViewRendered() {
+  const main = document.querySelector('div[role="main"]');
+  if (!(main instanceof HTMLElement)) {
+    return false;
+  }
+
+  return Boolean(main.querySelector('img[src*="/t/"]') || main.querySelector("[data-message-id], [data-legacy-message-id]"));
+}
+
+function refreshLoggedInEmailCache() {
+  const latest = detectCurrentLoggedInEmail();
+  if (latest) {
+    cachedLoggedInEmail = latest;
   }
 }
 
-function extractVisibleTrackedEmailIds() {
-  const markerSelectors = [
-    '[data-email-tracker-marker][data-snv]',
-    '[id^="snvTrackDiv-"]',
-    '[data-snv]'
-  ];
+function getCurrentLoggedInEmail() {
+  const detected = detectCurrentLoggedInEmail();
+  if (detected) {
+    cachedLoggedInEmail = detected;
+    return detected;
+  }
 
-  const ids = new Set();
-  const markers = document.querySelectorAll(markerSelectors.join(","));
-  markers.forEach((marker) => {
-    if (!(marker instanceof HTMLElement)) {
-      return;
+  return cachedLoggedInEmail;
+}
+
+function detectCurrentLoggedInEmail() {
+  const candidates = [];
+  const accountAnchor = document.querySelector('a[aria-label^="Google Account"], a[aria-label*="Google Account"]');
+
+  if (accountAnchor instanceof HTMLElement) {
+    candidates.push(accountAnchor.getAttribute("data-email"));
+    candidates.push(accountAnchor.getAttribute("aria-label"));
+    candidates.push(accountAnchor.getAttribute("title"));
+    candidates.push(accountAnchor.textContent);
+  }
+
+  const userInfoNode = document.querySelector('[data-email]');
+  if (userInfoNode instanceof HTMLElement) {
+    candidates.push(userInfoNode.getAttribute("data-email"));
+    candidates.push(userInfoNode.getAttribute("aria-label"));
+  }
+
+  for (const candidate of candidates) {
+    const emails = extractEmailsFromText(candidate || "");
+    if (emails.length > 0 && isLikelyEmail(emails[0])) {
+      return normalizeEmailCandidate(emails[0]);
+    }
+  }
+
+  return "";
+}
+
+function extractTokenFromTrackingSrc(src) {
+  const value = String(src || "");
+  const tokenHit = value.match(/\/t\/([^/?#.]+)\.gif/i);
+  return tokenHit?.[1] ? tokenHit[1] : "";
+}
+
+function decodeTrackingPayloadFromToken(token) {
+  const raw = String(token || "").trim();
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const normalized = raw.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+    const binary = atob(padded);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    const json = new TextDecoder().decode(bytes);
+    const parsed = JSON.parse(json);
+
+    if (Array.isArray(parsed)) {
+      const emailId = String(parsed[1] || "").trim().toLowerCase();
+      const senderEmail = normalizeEmailCandidate(parsed[4] || "");
+      return emailId ? { emailId, senderEmail } : null;
     }
 
-    if (!isMarkerInVisibleMessage(marker)) {
-      return;
+    if (parsed && typeof parsed === "object") {
+      const emailId = String(parsed.email_id || "").trim().toLowerCase();
+      const senderEmail = normalizeEmailCandidate(parsed.sender_email || "");
+      return emailId ? { emailId, senderEmail } : null;
     }
 
-    const candidate =
-      marker.dataset.snv ||
-      marker.getAttribute("data-snv") ||
-      marker.id.replace(/^snvTrackDiv-/i, "");
+    return null;
+  } catch {
+    // Token parse failures are expected on non-tracker images; fail silently.
+    return null;
+  }
+}
 
-    if (!candidate) {
-      return;
+function extractBaseUrlFromTrackingSrc(src) {
+  const value = String(src || "");
+
+  try {
+    const direct = new URL(value, window.location.origin);
+    if (direct.pathname.includes("/t/")) {
+      return `${direct.protocol}//${direct.host}`;
     }
 
-    const normalized = String(candidate).trim().toLowerCase();
-    if (/^[0-9a-f-]{36}$/.test(normalized)) {
-      ids.add(normalized);
+    const pathCandidate = `${direct.pathname}${direct.search}${direct.hash}`;
+    const embeddedHit = pathCandidate.match(/https?:\/\/[^\s"'#]+\/t\/[^/?#.]+\.gif/i);
+    if (embeddedHit?.[0]) {
+      const embedded = new URL(embeddedHit[0]);
+      return `${embedded.protocol}//${embedded.host}`;
     }
-  });
+  } catch {
+    // no-op
+  }
 
-  return Array.from(ids);
+  return "https://email-tracker.duckdns.org";
 }
 
 function isElementVisible(element) {
@@ -638,6 +792,22 @@ function findTrackedItemForRow(row) {
 
 function extractMarkerEmailIdFromRow(row) {
   const rowHtml = row.innerHTML || "";
+  const byCompactDataAttr = rowHtml.match(/data-et=["']([a-z0-9_-]{8,})["']/i);
+  if (byCompactDataAttr?.[1]) {
+    const decoded = decodeUuidCompact(byCompactDataAttr[1]);
+    if (decoded) {
+      return decoded;
+    }
+  }
+
+  const byCompactId = rowHtml.match(/id=["']s([a-z0-9_-]{8,})["']/i);
+  if (byCompactId?.[1]) {
+    const decoded = decodeUuidCompact(byCompactId[1]);
+    if (decoded) {
+      return decoded;
+    }
+  }
+
   const byDataAttr = rowHtml.match(/data-snv=["']([0-9a-f-]{36})["']/i);
   if (byDataAttr?.[1]) {
     return byDataAttr[1].toLowerCase();
@@ -655,6 +825,51 @@ function extractMarkerEmailIdFromRow(row) {
 function extractEmailsFromText(value) {
   const matches = String(value || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [];
   return matches.map((email) => email.toLowerCase());
+}
+
+function encodeUuidCompact(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(normalized)) {
+    return "";
+  }
+
+  const hex = normalized.replace(/-/g, "");
+  const bytes = [];
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes.push(Number.parseInt(hex.slice(i, i + 2), 16));
+  }
+
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function decodeUuidCompact(value) {
+  const compact = String(value || "").trim();
+  if (!compact) {
+    return "";
+  }
+
+  try {
+    const normalized = compact.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+    const binary = atob(padded);
+    if (binary.length !== 16) {
+      return "";
+    }
+
+    let hex = "";
+    for (let i = 0; i < binary.length; i += 1) {
+      hex += binary.charCodeAt(i).toString(16).padStart(2, "0");
+    }
+
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  } catch {
+    return "";
+  }
 }
 
 function isLikelyEmail(value) {

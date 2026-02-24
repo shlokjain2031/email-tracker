@@ -4,7 +4,7 @@ import { getDb, initDb } from "../db/sqlite.js";
 import { resolveGeoFromIp } from "./geoip.js";
 
 const DEDUP_WINDOW_MS = Number(process.env.DEDUP_WINDOW_MS || 30_000);
-const SENDER_HEARTBEAT_WINDOW_MS = Number(process.env.SENDER_HEARTBEAT_WINDOW_MS || 600_000);
+const SENDER_HEARTBEAT_WINDOW_MS = Number(process.env.SENDER_HEARTBEAT_WINDOW_MS || 2_000);
 
 export interface RecordOpenInput {
   payload: TrackingPayload;
