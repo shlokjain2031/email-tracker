@@ -153,6 +153,8 @@ This is the full lifecycle from install to dashboard analytics:
 
 ## Sender vs receiver separation (unique suppression model)
 
+<img width="900" height="600" alt="image" src="https://github.com/user-attachments/assets/da6341de-5e0e-41f3-821a-d4587bc9818a" />
+
 This project uses **identity-based, event-driven suppression** to prevent counting sender self-opens.
 
 How it works:
